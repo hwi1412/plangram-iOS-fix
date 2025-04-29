@@ -1,0 +1,4 @@
+module Test {
+    header "Test.h"  // 모듈에 포함할 헤더 파일명을 정확히 기입하세요.
+    export *
+}

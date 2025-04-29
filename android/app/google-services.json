@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "148847618419",
+    "project_id": "loginplangram",
+    "storage_bucket": "loginplangram.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:148847618419:android:ada9f1815e423acd027d06",
+        "android_client_info": {
+          "package_name": "com.hwi.plangram"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBeYA_1H6dM8PvBkMfah9Tu98JOnHiBqXk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
