@@ -1,7 +1,7 @@
-# Uncomment this line to define a global platform for your project
+# 최소 iOS 버전 지정
 platform :ios, '13.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+# CocoaPods 통계 비활성화
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -17,15 +17,14 @@ def flutter_root
   )
   unless File.exist?(generated_xcode_build_settings_path)
     raise "#{generated_xcode_build_settings_path} must exist. " \
-          "If you're running pod install manually, make sure flutter pub get is executed first"
+          "Run `flutter pub get` first."
   end
-
   File.foreach(generated_xcode_build_settings_path) do |line|
-    matches = line.match(/FLUTTER_ROOT\=(.*)/)
-    return matches[1].strip if matches
+    if matches = line.match(/FLUTTER_ROOT\=(.*)/)
+      return matches[1].strip
+    end
   end
-  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. " \
-        "Try deleting Generated.xcconfig, then run flutter pub get"
+  raise "FLUTTER_ROOT not found in Generated.xcconfig."
 end
 
 require File.expand_path(
@@ -37,7 +36,6 @@ flutter_ios_podfile_setup
 
 target 'Runner' do
   use_frameworks!
-
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 
   target 'RunnerTests' do
@@ -46,14 +44,14 @@ target 'Runner' do
 end
 
 # ────────────────────────────────────────────────────────────────────────────
-# **post_install은 한 번만** 선언합니다.**
+# post_install: Flutter 기본 설정 추가 + iOS 최소 버전 통일
 # ────────────────────────────────────────────────────────────────────────────
 post_install do |installer|
   installer.pods_project.targets.each do |target|
-    # 1) Flutter 기본 iOS 빌드 설정 적용
+    # Flutter 추가 빌드 설정
     flutter_additional_ios_build_settings(target)
 
-    # 2) 모든 Pod 타깃의 최소 iOS 버전을 13.0으로 통일
+    # 모든 Pod의 iOS 최소 배포 버전을 13.0으로 통일
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
     end
