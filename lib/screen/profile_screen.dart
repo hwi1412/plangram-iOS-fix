@@ -45,7 +45,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .ref()
           .child('profile_photos')
           .child('${currentUser.uid}.jpg');
-      await ref.putFile(imageFile);
+      final metadata =
+          firebase_storage.SettableMetadata(contentType: 'image/jpeg');
+      await ref.putFile(imageFile, metadata);
       String downloadUrl = await ref.getDownloadURL();
 
       // Firestore의 user 문서 업데이트

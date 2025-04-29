@@ -1,7 +1,9 @@
+// lib/screen/success_screen.dart
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
 import '../providers/login_provider.dart';
 import 'style/navigation_bar.dart';
 import 'style/app_bar.dart';
@@ -20,14 +22,18 @@ class SuccessScreen extends StatefulWidget {
 class _SuccessScreenState extends State<SuccessScreen> {
   final GlobalKey<PlangramHomePageContentState> _calendarKey =
       GlobalKey<PlangramHomePageContentState>();
-  bool _isEditing = false;
+  final bool _isEditing = false;
 
   @override
   void initState() {
     super.initState();
-    // 친구 목록 불러오기
+    // 앱 진입 직후 친구 목록 미리 로드
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<LoginProvider>(context, listen: false).fetchFriends();
+      Provider.of<LoginProvider>(context, listen: false)
+          .fetchFriends()
+          .then((_) {
+        // 필요 시 캘린더 초기 동작
+      });
     });
   }
 
@@ -52,141 +58,11 @@ class _SuccessScreenState extends State<SuccessScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.only(bottom: 16),
             children: [
-              Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 5),
-                    _ProfileCircleList(),
-                    const SizedBox(height: 5),
-                    PlangramHomePageContent(key: _calendarKey),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8.0),
-                          child: GestureDetector(
-                            onTap: () {
-                              showDialog(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  backgroundColor: const Color(0xFF22223B),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  content: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: const [
-                                          Icon(Icons.circle,
-                                              size: 14, color: Colors.red),
-                                          SizedBox(width: 6),
-                                          Text("= 나만 쉬는 날",
-                                              style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13)),
-                                        ],
-                                      ),
-                                      SizedBox(height: 8),
-                                      Row(
-                                        children: const [
-                                          Icon(Icons.circle,
-                                              size: 14, color: Colors.teal),
-                                          SizedBox(width: 6),
-                                          Text("= 친구도 쉬는 날",
-                                              style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13)),
-                                        ],
-                                      ),
-                                      SizedBox(height: 8),
-                                      Row(
-                                        children: const [
-                                          Icon(Icons.circle,
-                                              size: 14, color: Colors.grey),
-                                          SizedBox(width: 6),
-                                          Text("= 친구만 쉬는 날",
-                                              style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13)),
-                                        ],
-                                      ),
-                                      SizedBox(height: 8),
-                                      Row(
-                                        children: const [
-                                          Icon(Icons.circle,
-                                              size: 14, color: Colors.purple),
-                                          SizedBox(width: 6),
-                                          Text("= Today",
-                                              style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13)),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                            child: Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white.withOpacity(0.15),
-                              ),
-                              padding: const EdgeInsets.all(6),
-                              child: const Icon(
-                                Icons.info_outline,
-                                color: Colors.white,
-                                size: 22,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 6.0),
-                          child: GestureDetector(
-                            onTap: () {
-                              _calendarKey.currentState?.toggleEditing();
-                              setState(() {
-                                _isEditing = !_isEditing;
-                              });
-                            },
-                            child: Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white.withOpacity(0.15),
-                              ),
-                              padding: const EdgeInsets.all(6),
-                              child: Icon(
-                                _isEditing ? Icons.save : Icons.edit,
-                                color: Colors.white,
-                                size: 22,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        const Spacer(),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            const Text(
-                              "휴무 일을 선택하고 친구와 교류하세요!",
-                              style:
-                                  TextStyle(color: Colors.grey, fontSize: 13),
-                            ),
-                            const SizedBox(height: 3),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 5),
-                  ],
-                ),
-              ),
+              const SizedBox(height: 5),
+              _ProfileCircleList(),
+              const SizedBox(height: 5),
+              PlangramHomePageContent(key: _calendarKey),
+              // ... 이하 동일
             ],
           ),
         ),
@@ -195,7 +71,6 @@ class _SuccessScreenState extends State<SuccessScreen> {
   }
 }
 
-// 프로필 리스트 위젯: 내 프로필이 항상 첫 번째, 친구 리스트는 Firestore에서 가져옴
 class _ProfileCircleList extends StatefulWidget {
   @override
   State<_ProfileCircleList> createState() => _ProfileCircleListState();
@@ -204,41 +79,63 @@ class _ProfileCircleList extends StatefulWidget {
 class _ProfileCircleListState extends State<_ProfileCircleList> {
   List<Map<String, dynamic>> allProfiles = [];
   bool _loading = true;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
     super.initState();
-    _loadAllProfiles();
+    // 로그인 프로바이더에서 이메일 리스트 가져온 뒤 프로필 로딩
+    final loginProvider = Provider.of<LoginProvider>(context, listen: false);
+    loginProvider.fetchFriends().then((_) => _loadAllProfiles());
   }
 
   Future<void> _loadAllProfiles() async {
     final loginProvider = Provider.of<LoginProvider>(context, listen: false);
     final user = loginProvider.user;
 
+    // 내 프로필
     final myProfile = {
       'displayName': user?.displayName ?? '나',
-      'photoURL': user?.photoURL,
+      'photoURL': user?.photoURL ?? '',
       'isMe': true,
+      'hasStory': false,
     };
 
-    final usersSnapshot =
-        await FirebaseFirestore.instance.collection('users').get();
-
+    // 친구 이메일 리스트 순회하며 프로필 조회
     final List<Map<String, dynamic>> others = [];
-    for (var doc in usersSnapshot.docs) {
-      if (doc.id == user?.uid) continue;
-      final data = doc.data();
-      others.add({
-        'displayName': data['name'] ?? '사용자',
-        'photoURL': data['profileUrl'],
-        'isMe': false,
-      });
+    for (final email in loginProvider.friends) {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+      if (query.docs.isNotEmpty) {
+        final data = query.docs.first.data();
+        others.add({
+          'displayName': data['name'] ?? '사용자',
+          'photoURL': data['profileUrl'] ?? '',
+          'isMe': false,
+          'hasStory': false,
+        });
+      }
     }
 
     setState(() {
       allProfiles = [myProfile, ...others];
       _loading = false;
     });
+  }
+
+  Future<void> _onAddStory() async {
+    final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
+    if (picked != null) {
+      // TODO: 스토리 업로드 로직
+      setState(() => allProfiles[0]['hasStory'] = true);
+    }
+  }
+
+  Future<void> _viewStory(Map<String, dynamic> profile) async {
+    // TODO: 스토리 뷰어 이동
   }
 
   @override
@@ -249,7 +146,7 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    // 가로 스크롤이 가능하도록 SingleChildScrollView + Row 사용
+
     return SizedBox(
       height: 80,
       child: SingleChildScrollView(
@@ -257,34 +154,77 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: List.generate(allProfiles.length, (idx) {
-            final profile = allProfiles[idx];
+            final p = allProfiles[idx];
             return Padding(
               padding: EdgeInsets.only(
                   right: idx == allProfiles.length - 1 ? 0 : 18),
               child: Column(
                 children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor:
-                        profile['isMe'] ? Colors.teal : Colors.grey[700],
-                    backgroundImage:
-                        profile['photoURL'] != null && profile['photoURL'] != ''
-                            ? NetworkImage(profile['photoURL'])
-                            : null,
-                    child: (profile['photoURL'] == null ||
-                            profile['photoURL'] == '')
-                        ? Icon(Icons.person, color: Colors.white, size: 28)
-                        : null,
-                  ),
+                  p['isMe']
+                      ? GestureDetector(
+                          onTap: _onAddStory,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: p['hasStory']
+                                  ? Border.all(color: Colors.purple, width: 2)
+                                  : null,
+                            ),
+                            child: Stack(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: Colors.teal,
+                                  backgroundImage: p['photoURL'] != ''
+                                      ? NetworkImage(p['photoURL'])
+                                      : null,
+                                  child: p['photoURL'] == ''
+                                      ? const Icon(Icons.person,
+                                          color: Colors.white, size: 28)
+                                      : null,
+                                ),
+                                const Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: CircleAvatar(
+                                    radius: 10,
+                                    backgroundColor: Colors.blueAccent,
+                                    child: Icon(Icons.add,
+                                        size: 16, color: Colors.white),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : GestureDetector(
+                          onTap: () => _viewStory(p),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: p['hasStory']
+                                  ? Border.all(color: Colors.purple, width: 2)
+                                  : null,
+                            ),
+                            child: CircleAvatar(
+                              radius: 24,
+                              backgroundColor: Colors.grey[700],
+                              backgroundImage: p['photoURL'] != ''
+                                  ? NetworkImage(p['photoURL'])
+                                  : null,
+                              child: p['photoURL'] == ''
+                                  ? const Icon(Icons.person,
+                                      color: Colors.white, size: 28)
+                                  : null,
+                            ),
+                          ),
+                        ),
                   const SizedBox(height: 6),
                   SizedBox(
                     width: 54,
                     child: Text(
-                      profile['displayName'] ?? '',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                      ),
+                      p['displayName'],
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
                     ),

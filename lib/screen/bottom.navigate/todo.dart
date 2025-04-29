@@ -542,20 +542,6 @@ class _TodoScreenState extends State<TodoScreen> {
                       ),
                     ],
                   ),
-                  // 세로 중앙선 추가
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: SizedBox(
-                      height: 24,
-                      child: Center(
-                        child: Container(
-                          width: 1,
-                          height: double.infinity,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ),
-                    ),
-                  ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: SizedBox(
@@ -565,30 +551,21 @@ class _TodoScreenState extends State<TodoScreen> {
                         children:
                             List.generate(_selectedEvents.length, (index) {
                           final item = _selectedEvents[index];
-                          return Row(
-                            children: [
-                              const Spacer(),
-                              Expanded(
-                                flex: 0,
-                                child: ListTile(
-                                  contentPadding: EdgeInsets.zero,
-                                  leading: Checkbox(
-                                    value: item.completed,
-                                    activeColor: Colors.green,
-                                    onChanged: (value) {
-                                      setState(() {
-                                        item.completed = value!;
-                                        _updateTodoCompletion(item);
-                                      });
-                                    },
-                                  ),
-                                  title: Text(
-                                    item.text,
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                              ),
-                            ],
+                          return CheckboxListTile(
+                            contentPadding: const EdgeInsets.only(left: 50),
+                            value: item.completed,
+                            activeColor: Colors.green,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: Text(
+                              item.text,
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            onChanged: (value) {
+                              setState(() {
+                                item.completed = value!;
+                                _updateTodoCompletion(item);
+                              });
+                            },
                           );
                         }),
                       ),
