@@ -17,6 +17,10 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
   final ValueNotifier<List<DateTime>> _friendSelectedDates = ValueNotifier([]);
   bool isEditing = false;
   DateTime? _selectedDetailDay;
+
+  // SuccessScreen에서 접근할 수 있도록 getter 추가
+  DateTime? get selectedDetailDay => _selectedDetailDay;
+
   List<String> _usersForSelectedDay = [];
   StreamSubscription<QuerySnapshot>? _userScheduleSubscription;
   StreamSubscription<QuerySnapshot>? _friendScheduleSubscription;
@@ -407,7 +411,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              if (_usersForSelectedDay.length >= 3)
+              if (_usersForSelectedDay.length >= 2)
                 TextButton(
                   onPressed: () => _onCreatePlanGroupChat(_selectedDetailDay!),
                   style: TextButton.styleFrom(

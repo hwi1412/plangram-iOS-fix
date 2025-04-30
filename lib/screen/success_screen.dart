@@ -71,6 +71,9 @@ class _SuccessScreenState extends State<SuccessScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isDetailBoxVisible =
+        _calendarKey.currentState?.selectedDetailDay != null;
+
     return Scaffold(
       appBar: const CustomAppBar(),
       bottomNavigationBar: const CustomNavigationBar(),
@@ -95,14 +98,16 @@ class _SuccessScreenState extends State<SuccessScreen> {
                   const SizedBox(height: 5),
                   _ProfileCircleList(),
                   const SizedBox(height: 5),
-                  // 캘린더와 아이콘을 Stack으로 감싸지 않고, 캘린더 아래에 Row로 배치
                   PlangramHomePageContent(
                     key: _calendarKey,
                     isEditing: _isEditing,
                   ),
-                  // 캘린더를 벗어난 아래에, 왼쪽에 아이콘 두 개 가로 배치
                   Padding(
-                    padding: const EdgeInsets.only(top: 0, left: 12, bottom: 8),
+                    padding: EdgeInsets.only(
+                      top: 0,
+                      left: 12,
+                      bottom: 8 + (isDetailBoxVisible ? 5.0 : 0.0),
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.start,
                       children: [
