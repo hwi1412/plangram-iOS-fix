@@ -5,7 +5,8 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PlangramHomePageContent extends StatefulWidget {
-  const PlangramHomePageContent({super.key});
+  final bool isEditing;
+  const PlangramHomePageContent({super.key, this.isEditing = false});
 
   @override
   PlangramHomePageContentState createState() => PlangramHomePageContentState();
@@ -14,7 +15,7 @@ class PlangramHomePageContent extends StatefulWidget {
 class PlangramHomePageContentState extends State<PlangramHomePageContent> {
   final ValueNotifier<List<DateTime>> _selectedDates = ValueNotifier([]);
   final ValueNotifier<List<DateTime>> _friendSelectedDates = ValueNotifier([]);
-  bool isEditing = false; // 초기값 false로 변경
+  bool isEditing = false;
   DateTime? _selectedDetailDay;
   List<String> _usersForSelectedDay = [];
   StreamSubscription<QuerySnapshot>? _userScheduleSubscription;
@@ -23,11 +24,21 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
   @override
   void initState() {
     super.initState();
+    isEditing = widget.isEditing;
     _subscribeUserSchedules();
     _subscribeFriendSchedules();
   }
 
-  // 본인 일정 실시간 업데이트 (내 schedules 컬렉션 구독)
+  void setEditMode(bool edit) {
+    setState(() {
+      isEditing = edit;
+    });
+  }
+
+  void saveEdits() {
+    _onSavePressed();
+  }
+
   void _subscribeUserSchedules() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
@@ -46,7 +57,6 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
     });
   }
 
-  // 친구 일정 실시간 업데이트 (collectionGroup 구독 후 친구 목록으로 필터링)
   void _subscribeFriendSchedules() async {
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
@@ -60,7 +70,6 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
     final List<String> friendEmails =
         friendEmailsDynamic.map((e) => e.toString()).toList();
 
-    // 상호 친구 목록 가져오기: 내 이메일이 친구의 "friends" 리스트에 포함되어 있는 친구만 mutual 처리
     List<String> mutualFriendEmails = [];
     for (String email in friendEmails) {
       var queryResult = await FirebaseFirestore.instance
@@ -118,7 +127,6 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
     } else {
       if (_selectedDetailDay != null &&
           isSameDay(_selectedDetailDay, selectedDay)) {
-        // 같은 날을 다시 누르면 상세 정보 숨김
         setState(() {
           _selectedDetailDay = null;
         });
@@ -153,19 +161,6 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
     setState(() {
       _usersForSelectedDay = users.toList();
     });
-  }
-
-  void toggleEditing() {
-    if (!isEditing) {
-      setState(() {
-        isEditing = true;
-      });
-    } else {
-      _onSavePressed(); // 저장 후 editing 모드 종료
-      setState(() {
-        isEditing = false;
-      });
-    }
   }
 
   Future<void> _onSavePressed() async {
@@ -211,15 +206,10 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
     return querySnapshot.docs.map((doc) => doc.data()).toList();
   }
 
-  // 단체 채팅방 생성 함수 (자동 채팅방 이름: "MM/DD Plan")
   Future<void> _onCreatePlanGroupChat(DateTime day) async {
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
     final roomName = "${day.month}/${day.day} Plan";
-    // 그룹 채팅방에 현재 사용자를 포함하고, 선택된 사용자도 추가
-    // _usersForSelectedDay는 user id 대신 user name이 표시된다면
-    // Firestore "group_chat_rooms"에 저장 시 members는 이메일 등 고유 정보여야 함.
-    // 예시로, 여기서는 _usersForSelectedDay 값을 그대로 사용합니다.
     List<String> members = [
       if (currentUser.email != null) currentUser.email!,
       ..._usersForSelectedDay
@@ -234,11 +224,17 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
   }
 
   @override
+  void didUpdateWidget(covariant PlangramHomePageContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isEditing != oldWidget.isEditing) {
+      setEditMode(widget.isEditing);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // 상단 수정/저장 버튼 Row를 제거함
-        // ...existing code (제거된 버튼 관련 부분)...
         ValueListenableBuilder<List<DateTime>>(
           valueListenable: _selectedDates,
           builder: (context, selectedDates, _) {
@@ -359,7 +355,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
                           ),
                         );
                       }
-                      return null; // ...기본 셀 렌더링...
+                      return null;
                     },
                   ),
                   calendarStyle: CalendarStyle(
@@ -371,8 +367,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
                         TextStyle(color: Colors.white.withOpacity(0.3)),
                     todayDecoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color:
-                          Colors.purple.withOpacity(0.4), // 오늘 날짜 원 보라색 반투명 0.8
+                      color: Colors.purple.withOpacity(0.4),
                     ),
                   ),
                 );

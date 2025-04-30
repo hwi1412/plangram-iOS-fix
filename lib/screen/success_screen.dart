@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
+import 'dart:async';
 import '../providers/login_provider.dart';
 import 'style/navigation_bar.dart';
 import 'style/app_bar.dart';
@@ -22,18 +23,49 @@ class SuccessScreen extends StatefulWidget {
 class _SuccessScreenState extends State<SuccessScreen> {
   final GlobalKey<PlangramHomePageContentState> _calendarKey =
       GlobalKey<PlangramHomePageContentState>();
-  final bool _isEditing = false;
+  bool _isEditing = false;
+  bool _showInfo = false;
+  Timer? _infoTimer;
+
+  void _toggleEdit() {
+    setState(() {
+      if (_isEditing) {
+        _calendarKey.currentState?.saveEdits();
+      }
+      _isEditing = !_isEditing;
+      _calendarKey.currentState?.setEditMode(_isEditing);
+    });
+  }
+
+  void _toggleInfoBubble() {
+    setState(() {
+      _showInfo = !_showInfo;
+    });
+    if (_showInfo) {
+      _infoTimer?.cancel();
+    }
+  }
+
+  void _hideInfoBubble() {
+    setState(() {
+      _showInfo = false;
+    });
+    _infoTimer?.cancel();
+  }
+
+  @override
+  void dispose() {
+    _infoTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    // 앱 진입 직후 친구 목록 미리 로드
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<LoginProvider>(context, listen: false)
           .fetchFriends()
-          .then((_) {
-        // 필요 시 캘린더 초기 동작
-      });
+          .then((_) {});
     });
   }
 
@@ -43,30 +75,160 @@ class _SuccessScreenState extends State<SuccessScreen> {
       appBar: const CustomAppBar(),
       bottomNavigationBar: const CustomNavigationBar(),
       body: SafeArea(
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                const Color.fromARGB(255, 0, 57, 47),
-                const Color.fromARGB(255, 85, 27, 79),
-              ],
+        child: Stack(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    const Color.fromARGB(255, 0, 57, 47),
+                    const Color.fromARGB(255, 85, 27, 79),
+                  ],
+                ),
+              ),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 16),
+                children: [
+                  const SizedBox(height: 5),
+                  _ProfileCircleList(),
+                  const SizedBox(height: 5),
+                  // 캘린더와 아이콘을 Stack으로 감싸지 않고, 캘린더 아래에 Row로 배치
+                  PlangramHomePageContent(
+                    key: _calendarKey,
+                    isEditing: _isEditing,
+                  ),
+                  // 캘린더를 벗어난 아래에, 왼쪽에 아이콘 두 개 가로 배치
+                  Padding(
+                    padding: const EdgeInsets.only(top: 0, left: 12, bottom: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        GestureDetector(
+                          onTap: _toggleInfoBubble,
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            margin: const EdgeInsets.only(right: 10),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.7),
+                                width: 2,
+                              ),
+                              color: Colors.transparent,
+                            ),
+                            child: Icon(
+                              Icons.info_outline,
+                              color: Colors.white.withOpacity(0.7),
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: _toggleEdit,
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.7),
+                                width: 2,
+                              ),
+                              color: Colors.transparent,
+                            ),
+                            child: Icon(
+                              _isEditing ? Icons.save : Icons.edit,
+                              color: Colors.white.withOpacity(0.7),
+                              size: 18,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(bottom: 16),
-            children: [
-              const SizedBox(height: 5),
-              _ProfileCircleList(),
-              const SizedBox(height: 5),
-              PlangramHomePageContent(key: _calendarKey),
-              // ... 이하 동일
-            ],
-          ),
+            if (_showInfo)
+              Positioned.fill(
+                child: GestureDetector(
+                  onTap: _hideInfoBubble,
+                  child: Container(
+                    color: Colors.transparent,
+                    child: Center(
+                      child: GestureDetector(
+                        onTap: () {},
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 120),
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 18, horizontal: 22),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF102040).withOpacity(0.95),
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.08),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _LegendRow(color: Colors.red, text: '나만 쉬는 날'),
+                              const SizedBox(height: 8),
+                              _LegendRow(
+                                  color: Color(0xFF1DE9B6), text: '친구도 쉬는 날'),
+                              const SizedBox(height: 8),
+                              _LegendRow(color: Colors.grey, text: '친구만 쉬는 날'),
+                              const SizedBox(height: 8),
+                              _LegendRow(color: Colors.purple, text: 'Today'),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+class _LegendRow extends StatelessWidget {
+  final Color color;
+  final String text;
+  const _LegendRow({required this.color, required this.text});
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 16,
+          height: 16,
+          margin: const EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        Text(
+          '= $text',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -84,7 +246,6 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   @override
   void initState() {
     super.initState();
-    // 로그인 프로바이더에서 이메일 리스트 가져온 뒤 프로필 로딩
     final loginProvider = Provider.of<LoginProvider>(context, listen: false);
     loginProvider.fetchFriends().then((_) => _loadAllProfiles());
   }
@@ -93,7 +254,6 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
     final loginProvider = Provider.of<LoginProvider>(context, listen: false);
     final user = loginProvider.user;
 
-    // 내 프로필
     final myProfile = {
       'displayName': user?.displayName ?? '나',
       'photoURL': user?.photoURL ?? '',
@@ -101,7 +261,6 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
       'hasStory': false,
     };
 
-    // 친구 이메일 리스트 순회하며 프로필 조회
     final List<Map<String, dynamic>> others = [];
     for (final email in loginProvider.friends) {
       final query = await FirebaseFirestore.instance
@@ -129,14 +288,11 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   Future<void> _onAddStory() async {
     final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
     if (picked != null) {
-      // TODO: 스토리 업로드 로직
       setState(() => allProfiles[0]['hasStory'] = true);
     }
   }
 
-  Future<void> _viewStory(Map<String, dynamic> profile) async {
-    // TODO: 스토리 뷰어 이동
-  }
+  Future<void> _viewStory(Map<String, dynamic> profile) async {}
 
   @override
   Widget build(BuildContext context) {

@@ -7,21 +7,16 @@ class LoginProvider with ChangeNotifier {
   User? _user;
   String? _errorMessage;
 
-  /// friends 필드에는 친구들의 이메일 주소 리스트가 저장되어 있습니다.
+  /// users/{uid} 문서의 friends 필드:
+  ///   ["friend1@email.com", "friend2@email.com", ...]
   List<String> _friends = [];
 
-  // getters
+  // ── getters ──
   User? get user => _user;
   String? get errorMessage => _errorMessage;
   List<String> get friends => _friends;
 
-  // setters
-  void setUser(User? newUser) {
-    _user = newUser;
-    notifyListeners();
-  }
-
-  //===== Authentication =====//
+  // ── authentication ──
   Future<void> signInWithEmailAndPassword(String email, String password) async {
     try {
       final cred = await FirebaseAuth.instance
@@ -30,11 +25,7 @@ class LoginProvider with ChangeNotifier {
       _errorMessage = null;
       notifyListeners();
     } on FirebaseAuthException catch (e) {
-      // (기존 에러 처리 코드 유지)
-      _errorMessage = '로그인에 실패했습니다. (${e.code})';
-      notifyListeners();
-    } catch (e) {
-      _errorMessage = '알 수 없는 오류가 발생했습니다.';
+      _errorMessage = '로그인 실패: ${e.code}';
       notifyListeners();
     }
   }
@@ -50,60 +41,45 @@ class LoginProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  //===== friends =====//
-  /// users/{uid} 문서의 'friends' 필드(이메일 리스트) 불러오기
+  // ── friends ──
+  /// users/{uid}.friends(이메일 배열)을 로컬에 저장
   Future<void> fetchFriends() async {
     if (_user == null) return;
     final doc = await FirebaseFirestore.instance
         .collection('users')
         .doc(_user!.uid)
         .get();
-    final data = doc.data();
-    final List<dynamic> raw = data?['friends'] ?? [];
-    _friends = raw.cast<String>();
+    _friends = List<String>.from(doc.data()?['friends'] ?? []);
     notifyListeners();
   }
 
-  /// 이메일로 친구 추가 (원래 구현 유지)
+  /// 이메일을 friends 필드에 추가
   Future<void> addFriendByEmail(String friendEmail) async {
     if (_user == null) return;
     final firestore = FirebaseFirestore.instance;
-    final query = await firestore
-        .collection('users')
-        .where('email', isEqualTo: friendEmail)
-        .limit(1)
-        .get();
-    if (query.docs.isEmpty) {
-      throw Exception('해당 이메일의 사용자를 찾을 수 없습니다.');
-    }
-    final friendUid = query.docs.first.id;
     await firestore.collection('users').doc(_user!.uid).update({
       'friends': FieldValue.arrayUnion([friendEmail])
     });
     await fetchFriends();
   }
 
-  /// 친구 삭제 (원래 구현 유지)
-  Future<void> removeFriend(String friendEmail) async {
+  /// 이메일을 friends 필드에서 삭제
+  Future<void> removeFriendByEmail(String friendEmail) async {
     if (_user == null) return;
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_user!.uid)
-        .update({
+    final firestore = FirebaseFirestore.instance;
+    await firestore.collection('users').doc(_user!.uid).update({
       'friends': FieldValue.arrayRemove([friendEmail])
     });
     await fetchFriends();
   }
 
-  /// 친구 목록을 가져오는 메소드 (원래 구현 유지)
+  /// 친구 이메일 리스트를 가져옴
   Future<List<String>> getFriends() async {
     if (_user == null) return [];
     final doc = await FirebaseFirestore.instance
         .collection('users')
         .doc(_user!.uid)
         .get();
-    final data = doc.data();
-    final List<dynamic> raw = data?['friends'] ?? [];
-    return raw.cast<String>();
+    return List<String>.from(doc.data()?['friends'] ?? []);
   }
 }
