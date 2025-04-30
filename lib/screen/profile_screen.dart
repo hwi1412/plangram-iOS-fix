@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart' as firebase_storage;
 import 'dart:io';
 import 'package:provider/provider.dart';
 import '../providers/login_provider.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -17,6 +18,10 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   DocumentSnapshot<Map<String, dynamic>>? _userDoc;
 
+  // 프로필 수정용 변수
+  String? _profileText;
+  Color? _profileColor;
+
   Future<void> _loadUserData() async {
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
@@ -26,47 +31,161 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .get();
     setState(() {
       _userDoc = doc;
+      _profileText = doc.data()?['profileText'] as String?;
+      final colorStr = doc.data()?['profileColor'] as String?;
+      if (colorStr != null &&
+          colorStr.startsWith('#') &&
+          colorStr.length == 7) {
+        _profileColor =
+            Color(int.parse(colorStr.substring(1), radix: 16) + 0xFF000000);
+      } else if (colorStr != null && colorStr.length > 1) {
+        _profileColor = Color(int.parse(colorStr));
+      } else {
+        _profileColor = null;
+      }
     });
   }
 
   Future<void> _updateProfilePhoto() async {
-    // 이미지 선택
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile == null) return;
+    // 프로필 수정 모달(텍스트, 컬러)
+    String? tempText = _profileText ?? '';
+    Color tempColor = _profileColor ?? Colors.teal;
+    final controller = TextEditingController(text: tempText);
 
-    File imageFile = File(pickedFile.path);
-    User? currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
-
-    try {
-      // Firebase Storage에 업로드하고 URL 획득
-      final ref = firebase_storage.FirebaseStorage.instance
-          .ref()
-          .child('profile_photos')
-          .child('${currentUser.uid}.jpg');
-      final metadata =
-          firebase_storage.SettableMetadata(contentType: 'image/jpeg');
-      await ref.putFile(imageFile, metadata);
-      String downloadUrl = await ref.getDownloadURL();
-
-      // Firestore의 user 문서 업데이트
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .update({'profileUrl': downloadUrl});
-
-      // 화면 갱신
-      await _loadUserData();
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('프로필 사진이 업데이트되었습니다.')));
-    } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('업로드 실패: $e')));
-    }
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent, // 배경 투명
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) {
+        return Container(
+          decoration: BoxDecoration(
+            color: const Color(0xEE102040), // 어두운 반투명 남색
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 24,
+              right: 24,
+              top: 24,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('프로필 수정',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: Colors.white)),
+                const SizedBox(height: 18),
+                TextField(
+                  controller: controller,
+                  maxLength: 10,
+                  decoration: const InputDecoration(
+                    labelText: '프로필 텍스트(이모지 가능)',
+                    border: OutlineInputBorder(),
+                    labelStyle: TextStyle(color: Colors.white70),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    const Text('배경색 선택:',
+                        style: TextStyle(color: Colors.white)),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTap: () {
+                        showDialog(
+                          context: context,
+                          builder: (ctx) {
+                            Color pickerColor = tempColor;
+                            return AlertDialog(
+                              backgroundColor: const Color(0xFF102040),
+                              title: const Text('컬러 선택',
+                                  style: TextStyle(color: Colors.white)),
+                              content: SingleChildScrollView(
+                                child: ColorPicker(
+                                  pickerColor: pickerColor,
+                                  onColorChanged: (c) {
+                                    pickerColor = c;
+                                  },
+                                  enableAlpha: false,
+                                  showLabel: false,
+                                  pickerAreaHeightPercent: 0.7,
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  child: const Text('확인',
+                                      style: TextStyle(color: Colors.white)),
+                                  onPressed: () {
+                                    Navigator.of(ctx).pop(pickerColor);
+                                  },
+                                ),
+                              ],
+                            );
+                          },
+                        ).then((picked) {
+                          if (picked is Color) {
+                            setState(() {
+                              tempColor = picked;
+                            });
+                          }
+                        });
+                      },
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: tempColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.grey.shade400),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () async {
+                    User? currentUser = FirebaseAuth.instance.currentUser;
+                    if (currentUser == null) return;
+                    final colorStr =
+                        '#${tempColor.value.toRadixString(16).padLeft(8, '0').substring(2)}';
+                    await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(currentUser.uid)
+                        .update({
+                      'profileText': controller.text,
+                      'profileColor': colorStr,
+                    });
+                    setState(() {
+                      _profileText = controller.text;
+                      _profileColor = tempColor;
+                    });
+                    Navigator.of(context).pop();
+                    await _loadUserData();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.pink,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                  child: const Text('저장'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
-  // 계정 삭제 함수 수정 (재인증 추가)
   Future<void> _deleteAccount() async {
     try {
       // 재인증을 위한 다이얼로그 출력
@@ -181,24 +300,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           mainAxisAlignment: MainAxisAlignment.start,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            // 상단에 배치 (위쪽 여백은 필요한 경우 추가)
                             const SizedBox(height: 16),
-                            // 프로필 사진 영역
-                            CircleAvatar(
-                              radius: 50,
-                              backgroundImage:
-                                  _userDoc!.data()?['profileUrl'] != null
-                                      ? NetworkImage(
-                                          _userDoc!.data()!['profileUrl'])
+                            // 프로필 사진/텍스트/컬러 영역
+                            Builder(
+                              builder: (context) {
+                                final profileUrl =
+                                    _userDoc!.data()?['profileUrl'] as String?;
+                                final profileText =
+                                    _userDoc!.data()?['profileText'] as String?;
+                                final colorStr = _userDoc!
+                                    .data()?['profileColor'] as String?;
+                                Color bgColor = Colors.teal;
+                                if (colorStr != null &&
+                                    colorStr.startsWith('#') &&
+                                    colorStr.length == 7) {
+                                  bgColor = Color(int.parse(
+                                          colorStr.substring(1),
+                                          radix: 16) +
+                                      0xFF000000);
+                                } else if (colorStr != null &&
+                                    colorStr.length > 1) {
+                                  bgColor = Color(int.parse(colorStr));
+                                }
+                                return CircleAvatar(
+                                  radius: 50,
+                                  backgroundColor: bgColor,
+                                  backgroundImage: profileUrl != null &&
+                                          profileUrl.isNotEmpty
+                                      ? NetworkImage(profileUrl)
                                       : null,
-                              backgroundColor: Colors.grey,
-                              child: _userDoc!.data()?['profileUrl'] == null
-                                  ? const Icon(
-                                      Icons.person,
-                                      size: 50,
-                                      color: Colors.white,
-                                    )
-                                  : null,
+                                  child:
+                                      (profileUrl == null || profileUrl.isEmpty)
+                                          ? Text(
+                                              (profileText ?? '🙂'),
+                                              style: const TextStyle(
+                                                fontSize: 38,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            )
+                                          : null,
+                                );
+                              },
                             ),
                             const SizedBox(height: 16),
                             Text(
@@ -228,10 +371,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 foregroundColor: Colors.pink,
                                 side: const BorderSide(color: Colors.pink),
                               ),
-                              child: const Text('프로필 사진 변경'),
+                              child: const Text('프로필 수정'),
                             ),
                             const SizedBox(height: 16),
-                            // 계정 삭제 버튼 추가
                             ElevatedButton(
                               onPressed: _deleteAccount,
                               style: ElevatedButton.styleFrom(
