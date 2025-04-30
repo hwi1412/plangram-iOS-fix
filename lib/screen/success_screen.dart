@@ -140,11 +140,7 @@ class _SuccessScreenState extends State<SuccessScreen> {
                             margin: const EdgeInsets.only(right: 10),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.7),
-                                width: 2,
-                              ),
-                              color: Colors.transparent,
+                              color: Colors.white.withOpacity(0.3), // 흰색 반투명 배경
                             ),
                             child: Icon(
                               Icons.info_outline,
@@ -160,11 +156,7 @@ class _SuccessScreenState extends State<SuccessScreen> {
                             height: 32,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white.withOpacity(0.7),
-                                width: 2,
-                              ),
-                              color: Colors.transparent,
+                              color: Colors.white.withOpacity(0.3), // 흰색 반투명 배경
                             ),
                             child: Icon(
                               _isEditing ? Icons.save : Icons.edit,
