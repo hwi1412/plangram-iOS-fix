@@ -248,11 +248,16 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   bool _loading = true;
   final ImagePicker _picker = ImagePicker();
 
+  // 오늘 상태 관련 변수
+  int? _todayStatus; // 0: 가능, 1: 바쁨, 2: 휴식
+  bool _showTodayStatusSelector = false;
+
   @override
   void initState() {
     super.initState();
     final loginProvider = Provider.of<LoginProvider>(context, listen: false);
     loginProvider.fetchFriends().then((_) => _loadAllProfiles());
+    _loadTodayStatus();
   }
 
   Future<void> _loadAllProfiles() async {
@@ -290,6 +295,73 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
     });
   }
 
+  // 오늘 상태 Firestore에서 불러오기
+  Future<void> _loadTodayStatus() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final doc = await FirebaseFirestore.instance
+        .collection('today_status')
+        .doc(user.uid)
+        .get();
+    if (doc.exists) {
+      final data = doc.data();
+      setState(() {
+        _todayStatus = data?['status'] as int? ?? 0;
+      });
+    } else {
+      setState(() {
+        _todayStatus = 0;
+      });
+    }
+  }
+
+  // 오늘 상태 Firestore에 저장
+  Future<void> _setTodayStatus(int status) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    await FirebaseFirestore.instance
+        .collection('today_status')
+        .doc(user.uid)
+        .set({
+      'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    setState(() {
+      _todayStatus = status;
+      _showTodayStatusSelector = false;
+    });
+  }
+
+  // 오늘 상태 말풍선 토글
+  void _toggleTodayStatusSelector() {
+    setState(() {
+      _showTodayStatusSelector = !_showTodayStatusSelector;
+    });
+  }
+
+  // 오늘 상태 텍스트 및 색상
+  String get _todayStatusText {
+    switch (_todayStatus) {
+      case 1:
+        return "바쁨";
+      case 2:
+        return "휴식 중";
+      default:
+        return "만남 가능";
+    }
+  }
+
+  Color get _todayStatusColor {
+    switch (_todayStatus) {
+      case 1:
+        return Colors.orange;
+      case 2:
+        return Colors.blueGrey;
+      default:
+        return Colors.green;
+    }
+  }
+
   Future<void> _onAddStory() async {
     final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
     if (picked != null) {
@@ -310,32 +382,99 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
 
     return SizedBox(
       height: 80,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: List.generate(allProfiles.length, (idx) {
-            final p = allProfiles[idx];
-            return Padding(
-              padding: EdgeInsets.only(
-                  right: idx == allProfiles.length - 1 ? 0 : 18),
-              child: Column(
-                children: [
-                  p['isMe']
-                      ? GestureDetector(
-                          onTap: _onAddStory,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: p['hasStory']
-                                  ? Border.all(color: Colors.purple, width: 2)
-                                  : null,
-                            ),
-                            child: Stack(
+      child: Stack(
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: List.generate(allProfiles.length, (idx) {
+                final p = allProfiles[idx];
+                final isMe = p['isMe'] == true;
+                return Padding(
+                  padding: EdgeInsets.only(
+                      right: idx == allProfiles.length - 1 ? 0 : 18),
+                  child: Column(
+                    children: [
+                      isMe
+                          ? Stack(
+                              clipBehavior: Clip.none,
                               children: [
-                                CircleAvatar(
+                                GestureDetector(
+                                  onTap: () {}, // 프로필 사진 탭 시 아무 동작 없음
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: null,
+                                    ),
+                                    child: CircleAvatar(
+                                      radius: 24,
+                                      backgroundColor: Colors.teal,
+                                      backgroundImage: p['photoURL'] != ''
+                                          ? NetworkImage(p['photoURL'])
+                                          : null,
+                                      child: p['photoURL'] == ''
+                                          ? const Icon(Icons.person,
+                                              color: Colors.white, size: 28)
+                                          : null,
+                                    ),
+                                  ),
+                                ),
+                                // Today 상태 버튼 (플러스 대신)
+                                Positioned(
+                                  bottom: -6,
+                                  right: -6,
+                                  child: GestureDetector(
+                                    onTap: _toggleTodayStatusSelector,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            _todayStatusColor.withOpacity(0.9),
+                                        borderRadius: BorderRadius.circular(16),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color:
+                                                Colors.black.withOpacity(0.08),
+                                            blurRadius: 4,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.today,
+                                              color: Colors.white, size: 16),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            _todayStatusText,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : GestureDetector(
+                              onTap: () {}, // 친구 프로필 탭 시 아무 동작 없음
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: p['hasStory']
+                                      ? Border.all(
+                                          color: Colors.purple, width: 2)
+                                      : null,
+                                ),
+                                child: CircleAvatar(
                                   radius: 24,
-                                  backgroundColor: Colors.teal,
+                                  backgroundColor: Colors.grey[700],
                                   backgroundImage: p['photoURL'] != ''
                                       ? NetworkImage(p['photoURL'])
                                       : null,
@@ -344,57 +483,119 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
                                           color: Colors.white, size: 28)
                                       : null,
                                 ),
-                                const Positioned(
-                                  bottom: 0,
-                                  right: 0,
-                                  child: CircleAvatar(
-                                    radius: 10,
-                                    backgroundColor: Colors.blueAccent,
-                                    child: Icon(Icons.add,
-                                        size: 16, color: Colors.white),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
-                          ),
-                        )
-                      : GestureDetector(
-                          onTap: () => _viewStory(p),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: p['hasStory']
-                                  ? Border.all(color: Colors.purple, width: 2)
-                                  : null,
-                            ),
-                            child: CircleAvatar(
-                              radius: 24,
-                              backgroundColor: Colors.grey[700],
-                              backgroundImage: p['photoURL'] != ''
-                                  ? NetworkImage(p['photoURL'])
-                                  : null,
-                              child: p['photoURL'] == ''
-                                  ? const Icon(Icons.person,
-                                      color: Colors.white, size: 28)
-                                  : null,
-                            ),
-                          ),
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        width: 54,
+                        child: Text(
+                          p['displayName'],
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
                         ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    width: 54,
-                    child: Text(
-                      p['displayName'],
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
+                      ),
+                    ],
                   ),
-                ],
+                );
+              }),
+            ),
+          ),
+          // 오늘 상태 선택 말풍선
+          if (_showTodayStatusSelector)
+            Positioned(
+              left: 36,
+              top: 0,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.12),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _TodayStatusOption(
+                        icon: Icons.check_circle,
+                        color: Colors.green,
+                        text: "오늘 만남 가능",
+                        selected: _todayStatus == 0,
+                        onTap: () => _setTodayStatus(0),
+                      ),
+                      const SizedBox(height: 10),
+                      _TodayStatusOption(
+                        icon: Icons.block,
+                        color: Colors.orange,
+                        text: "바쁨",
+                        selected: _todayStatus == 1,
+                        onTap: () => _setTodayStatus(1),
+                      ),
+                      const SizedBox(height: 10),
+                      _TodayStatusOption(
+                        icon: Icons.self_improvement,
+                        color: Colors.blueGrey,
+                        text: "휴식 중",
+                        selected: _todayStatus == 2,
+                        onTap: () => _setTodayStatus(2),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            );
-          }),
-        ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// 오늘 상태 선택 옵션 위젯
+class _TodayStatusOption extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String text;
+  final bool selected;
+  final VoidCallback onTap;
+  const _TodayStatusOption({
+    required this.icon,
+    required this.color,
+    required this.text,
+    required this.selected,
+    required this.onTap,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+              fontSize: 15,
+            ),
+          ),
+          if (selected)
+            const Padding(
+              padding: EdgeInsets.only(left: 6),
+              child: Icon(Icons.check, color: Colors.black54, size: 16),
+            ),
+        ],
       ),
     );
   }
