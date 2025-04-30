@@ -26,6 +26,8 @@ class _SuccessScreenState extends State<SuccessScreen> {
   bool _isEditing = false;
   bool _showInfo = false;
   Timer? _infoTimer;
+  int? _todayStatus;
+  bool _showTodayStatusSelector = false;
 
   void _toggleEdit() {
     setState(() {
@@ -51,6 +53,20 @@ class _SuccessScreenState extends State<SuccessScreen> {
       _showInfo = false;
     });
     _infoTimer?.cancel();
+  }
+
+  void _handleShowTodayStatusSelector() {
+    setState(() {
+      _showTodayStatusSelector = !_showTodayStatusSelector;
+    });
+  }
+
+  void _handleSetTodayStatus(int status) {
+    setState(() {
+      _todayStatus = status;
+      _showTodayStatusSelector = false;
+    });
+    // Firestore 저장 등 기존 로직 필요시 추가
   }
 
   @override
@@ -95,9 +111,14 @@ class _SuccessScreenState extends State<SuccessScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.only(bottom: 16),
                 children: [
-                  const SizedBox(height: 5),
-                  _ProfileCircleList(),
-                  const SizedBox(height: 5),
+                  const SizedBox(height: 44), // 위쪽 공간 더 넓게 (기존 30 → 44)
+                  _ProfileCircleList(
+                    onShowTodayStatusSelector: _handleShowTodayStatusSelector,
+                    showTodayStatusSelector: _showTodayStatusSelector,
+                    todayStatus: _todayStatus,
+                    onSetTodayStatus: _handleSetTodayStatus,
+                  ),
+                  const SizedBox(height: 0), // 아래 공간 더 좁게 (기존 5 → 0)
                   PlangramHomePageContent(
                     key: _calendarKey,
                     isEditing: _isEditing,
@@ -201,6 +222,57 @@ class _SuccessScreenState extends State<SuccessScreen> {
                   ),
                 ),
               ),
+            if (_showTodayStatusSelector)
+              Positioned(
+                left: 52, // 프로필 위치에 맞게 조정
+                top: 50, // 기존 30 → 50 (프로필 원 아래쪽에 위치)
+                child: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 18),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.12),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _TodayStatusOption(
+                          icon: Icons.check_circle,
+                          color: Colors.green,
+                          text: "만나자",
+                          selected: _todayStatus == 0,
+                          onTap: () => _handleSetTodayStatus(0),
+                        ),
+                        const SizedBox(height: 12),
+                        _TodayStatusOption(
+                          icon: Icons.block,
+                          color: Colors.orange,
+                          text: "바쁨",
+                          selected: _todayStatus == 1,
+                          onTap: () => _handleSetTodayStatus(1),
+                        ),
+                        const SizedBox(height: 12),
+                        _TodayStatusOption(
+                          icon: Icons.self_improvement,
+                          color: Colors.blueGrey,
+                          text: "휴식 중",
+                          selected: _todayStatus == 2,
+                          onTap: () => _handleSetTodayStatus(2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -239,6 +311,19 @@ class _LegendRow extends StatelessWidget {
 }
 
 class _ProfileCircleList extends StatefulWidget {
+  final VoidCallback onShowTodayStatusSelector;
+  final bool showTodayStatusSelector;
+  final int? todayStatus;
+  final ValueChanged<int> onSetTodayStatus;
+
+  const _ProfileCircleList({
+    super.key,
+    required this.onShowTodayStatusSelector,
+    required this.showTodayStatusSelector,
+    required this.todayStatus,
+    required this.onSetTodayStatus,
+  });
+
   @override
   State<_ProfileCircleList> createState() => _ProfileCircleListState();
 }
@@ -247,10 +332,9 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   List<Map<String, dynamic>> allProfiles = [];
   bool _loading = true;
   final ImagePicker _picker = ImagePicker();
-
-  // 오늘 상태 관련 변수
-  int? _todayStatus; // 0: 가능, 1: 바쁨, 2: 휴식
-  bool _showTodayStatusSelector = false;
+  String? _userDocProfileUrl;
+  String? _userDocProfileText;
+  Color? _userDocProfileColor;
 
   @override
   void initState() {
@@ -258,18 +342,58 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
     final loginProvider = Provider.of<LoginProvider>(context, listen: false);
     loginProvider.fetchFriends().then((_) => _loadAllProfiles());
     _loadTodayStatus();
+    _loadUserProfileFromFirestore();
+  }
+
+  Future<void> _loadUserProfileFromFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    final data = doc.data();
+    setState(() {
+      _userDocProfileUrl = data?['profileUrl'] ?? '';
+      _userDocProfileText = data?['profileText'];
+      final colorStr = data?['profileColor'];
+      if (colorStr is String &&
+          colorStr.startsWith('#') &&
+          colorStr.length == 7) {
+        _userDocProfileColor =
+            Color(int.parse(colorStr.substring(1), radix: 16) + 0xFF000000);
+      } else if (colorStr is String && colorStr.length > 1) {
+        _userDocProfileColor = Color(int.parse(colorStr));
+      } else {
+        _userDocProfileColor = null;
+      }
+    });
   }
 
   Future<void> _loadAllProfiles() async {
     final loginProvider = Provider.of<LoginProvider>(context, listen: false);
     final user = loginProvider.user;
 
-    final myProfile = {
+    Map<String, dynamic> myProfile = {
       'displayName': user?.displayName ?? '나',
       'photoURL': user?.photoURL ?? '',
       'isMe': true,
       'hasStory': false,
+      'profileText': null,
+      'profileColor': null,
     };
+    if (user != null) {
+      final myDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final myData = myDoc.data();
+      if (myData != null) {
+        myProfile['profileText'] = myData['profileText'];
+        myProfile['profileColor'] = myData['profileColor'];
+        myProfile['photoURL'] = myData['profileUrl'] ?? user.photoURL ?? '';
+      }
+    }
 
     final List<Map<String, dynamic>> others = [];
     for (final email in loginProvider.friends) {
@@ -285,6 +409,8 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
           'photoURL': data['profileUrl'] ?? '',
           'isMe': false,
           'hasStory': false,
+          'profileText': data['profileText'],
+          'profileColor': data['profileColor'],
         });
       }
     }
@@ -295,7 +421,6 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
     });
   }
 
-  // 오늘 상태 Firestore에서 불러오기
   Future<void> _loadTodayStatus() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -306,53 +431,32 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
     if (doc.exists) {
       final data = doc.data();
       setState(() {
-        _todayStatus = data?['status'] as int? ?? 0;
+        widget.onSetTodayStatus(data?['status'] as int? ?? 0);
       });
     } else {
       setState(() {
-        _todayStatus = 0;
+        widget.onSetTodayStatus(0);
       });
     }
   }
 
-  // 오늘 상태 Firestore에 저장
-  Future<void> _setTodayStatus(int status) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    await FirebaseFirestore.instance
-        .collection('today_status')
-        .doc(user.uid)
-        .set({
-      'status': status,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    setState(() {
-      _todayStatus = status;
-      _showTodayStatusSelector = false;
-    });
-  }
-
-  // 오늘 상태 말풍선 토글
   void _toggleTodayStatusSelector() {
-    setState(() {
-      _showTodayStatusSelector = !_showTodayStatusSelector;
-    });
+    widget.onShowTodayStatusSelector();
   }
 
-  // 오늘 상태 텍스트 및 색상
   String get _todayStatusText {
-    switch (_todayStatus) {
+    switch (widget.todayStatus) {
       case 1:
         return "바쁨";
       case 2:
         return "휴식 중";
       default:
-        return "만남 가능";
+        return "만나자";
     }
   }
 
   Color get _todayStatusColor {
-    switch (_todayStatus) {
+    switch (widget.todayStatus) {
       case 1:
         return Colors.orange;
       case 2:
@@ -383,56 +487,102 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
     return SizedBox(
       height: 80,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           SingleChildScrollView(
+            clipBehavior: Clip.none,
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.only(left: 16, right: 40),
             child: Row(
               children: List.generate(allProfiles.length, (idx) {
                 final p = allProfiles[idx];
                 final isMe = p['isMe'] == true;
+                Color? profileColor;
+                final colorStr = p['profileColor'];
+                if (colorStr is String &&
+                    colorStr.startsWith('#') &&
+                    colorStr.length == 7) {
+                  profileColor = Color(
+                      int.parse(colorStr.substring(1), radix: 16) + 0xFF000000);
+                } else if (colorStr is String && colorStr.length > 1) {
+                  profileColor = Color(int.parse(colorStr));
+                }
                 return Padding(
                   padding: EdgeInsets.only(
                       right: idx == allProfiles.length - 1 ? 0 : 18),
                   child: Column(
                     children: [
-                      isMe
-                          ? Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                GestureDetector(
-                                  onTap: () {}, // 프로필 사진 탭 시 아무 동작 없음
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: null,
-                                    ),
-                                    child: CircleAvatar(
-                                      radius: 24,
-                                      backgroundColor: Colors.teal,
-                                      backgroundImage: p['photoURL'] != ''
-                                          ? NetworkImage(p['photoURL'])
-                                          : null,
-                                      child: p['photoURL'] == ''
-                                          ? const Icon(Icons.person,
-                                              color: Colors.white, size: 28)
-                                          : null,
-                                    ),
-                                  ),
-                                ),
-                                // Today 상태 버튼 (플러스 대신)
-                                Positioned(
-                                  bottom: -6,
-                                  right: -6,
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          GestureDetector(
+                            onTap: isMe
+                                ? () {
+                                    _toggleTodayStatusSelector();
+                                  }
+                                : null,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: null,
+                              ),
+                              child: CircleAvatar(
+                                radius: 24,
+                                backgroundColor: (isMe
+                                    ? (_userDocProfileColor ?? Colors.teal)
+                                    : profileColor ?? Colors.grey[700]),
+                                backgroundImage: (isMe
+                                    ? (_userDocProfileUrl != null &&
+                                            _userDocProfileUrl!.isNotEmpty)
+                                        ? NetworkImage(_userDocProfileUrl!)
+                                        : null
+                                    : (p['photoURL'] != null &&
+                                            (p['photoURL'] as String)
+                                                .isNotEmpty)
+                                        ? NetworkImage(p['photoURL'])
+                                        : null),
+                                child: (isMe
+                                        ? (_userDocProfileUrl == null ||
+                                            _userDocProfileUrl!.isEmpty)
+                                        : (p['photoURL'] == null ||
+                                            (p['photoURL'] as String).isEmpty))
+                                    ? Text(
+                                        isMe
+                                            ? (_userDocProfileText ?? '🙂')
+                                            : (p['profileText'] ?? '🙂'),
+                                        style: const TextStyle(
+                                          fontSize: 22,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          if (isMe)
+                            Positioned(
+                              top: -32,
+                              left: -12,
+                              right: -12,
+                              child: Center(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
                                   child: GestureDetector(
-                                    onTap: _toggleTodayStatusSelector,
+                                    behavior: HitTestBehavior.translucent,
+                                    // 말풍선은 터치해도 아무 동작 없음
+                                    onTap: null,
                                     child: Container(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 240,
+                                        minWidth: 120,
+                                      ),
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 4),
+                                          horizontal: 28, vertical: 14),
                                       decoration: BoxDecoration(
                                         color:
                                             _todayStatusColor.withOpacity(0.9),
-                                        borderRadius: BorderRadius.circular(16),
+                                        borderRadius: BorderRadius.circular(22),
                                         boxShadow: [
                                           BoxShadow(
                                             color:
@@ -443,16 +593,20 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
                                         ],
                                       ),
                                       child: Row(
+                                        mainAxisSize: MainAxisSize.min,
                                         children: [
                                           const Icon(Icons.today,
-                                              color: Colors.white, size: 16),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            _todayStatusText,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white, size: 40),
+                                          const SizedBox(width: 10),
+                                          Flexible(
+                                            child: Text(
+                                              _todayStatusText,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 33,
+                                                fontWeight: FontWeight.bold,
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -460,31 +614,10 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
                                     ),
                                   ),
                                 ),
-                              ],
-                            )
-                          : GestureDetector(
-                              onTap: () {}, // 친구 프로필 탭 시 아무 동작 없음
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: p['hasStory']
-                                      ? Border.all(
-                                          color: Colors.purple, width: 2)
-                                      : null,
-                                ),
-                                child: CircleAvatar(
-                                  radius: 24,
-                                  backgroundColor: Colors.grey[700],
-                                  backgroundImage: p['photoURL'] != ''
-                                      ? NetworkImage(p['photoURL'])
-                                      : null,
-                                  child: p['photoURL'] == ''
-                                      ? const Icon(Icons.person,
-                                          color: Colors.white, size: 28)
-                                      : null,
-                                ),
                               ),
                             ),
+                        ],
+                      ),
                       const SizedBox(height: 6),
                       SizedBox(
                         width: 54,
@@ -502,65 +635,12 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
               }),
             ),
           ),
-          // 오늘 상태 선택 말풍선
-          if (_showTodayStatusSelector)
-            Positioned(
-              left: 36,
-              top: 0,
-              child: Material(
-                color: Colors.transparent,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.12),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _TodayStatusOption(
-                        icon: Icons.check_circle,
-                        color: Colors.green,
-                        text: "오늘 만남 가능",
-                        selected: _todayStatus == 0,
-                        onTap: () => _setTodayStatus(0),
-                      ),
-                      const SizedBox(height: 10),
-                      _TodayStatusOption(
-                        icon: Icons.block,
-                        color: Colors.orange,
-                        text: "바쁨",
-                        selected: _todayStatus == 1,
-                        onTap: () => _setTodayStatus(1),
-                      ),
-                      const SizedBox(height: 10),
-                      _TodayStatusOption(
-                        icon: Icons.self_improvement,
-                        color: Colors.blueGrey,
-                        text: "휴식 중",
-                        selected: _todayStatus == 2,
-                        onTap: () => _setTodayStatus(2),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );
   }
 }
 
-// 오늘 상태 선택 옵션 위젯
 class _TodayStatusOption extends StatelessWidget {
   final IconData icon;
   final Color color;
