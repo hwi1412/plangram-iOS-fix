@@ -9,10 +9,13 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends State<SearchScreen> {
+class _SearchScreenState extends State<SearchScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   List<DocumentSnapshot> _results = [];
   List<dynamic> friends = [];
+  late AnimationController _animationController;
+  late Animation<double> _animation;
 
   Future<void> _search() async {
     String query = _searchController.text.trim().toLowerCase(); // 소문자로 변환
@@ -99,134 +102,186 @@ class _SearchScreenState extends State<SearchScreen> {
   void initState() {
     super.initState();
     _loadFriends();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          '이메일로 친구 추가',
-          style: TextStyle(fontSize: 24),
-        ),
-        backgroundColor: Colors.transparent,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                Color.fromARGB(255, 0, 57, 47), // 다크 버전 시작 색상
-                Color.fromARGB(255, 85, 27, 79), // 다크 버전 종료 색상
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        // 남색 계열의 두 가지 색상 그라디언트
+        final Color color1 = Color.lerp(const Color(0xFF0A2342),
+            const Color(0xFF1B2845), _animation.value)!;
+        final Color color2 = Color.lerp(const Color(0xFF274472),
+            const Color(0xFF102542), 1 - _animation.value)!;
+
+        return Scaffold(
+          extendBodyBehindAppBar: true,
+          appBar: AppBar(
+            title: const Text(
+              '친구 찾기',
+              style: TextStyle(fontSize: 24),
+            ),
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            flexibleSpace: AnimatedContainer(
+              duration: const Duration(milliseconds: 800),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [color1, color2],
+                ),
+              ),
+            ),
+            titleTextStyle: const TextStyle(color: Colors.white),
+          ),
+          body: AnimatedContainer(
+            duration: const Duration(milliseconds: 800),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [color1, color2],
+              ),
+            ),
+            padding: const EdgeInsets.all(15),
+            child: Column(
+              children: [
+                const SizedBox(height: 130),
+                TextField(
+                  controller: _searchController,
+                  decoration: const InputDecoration(
+                    labelText: '이메일 또는 이름 검색',
+                    labelStyle: TextStyle(color: Colors.white),
+                  ),
+                  style: const TextStyle(color: Colors.white),
+                  cursorColor: Colors.white,
+                  onTap: () {
+                    setState(() {
+                      _searchController.clear();
+                    });
+                  },
+                ),
+                TextButton(
+                  onPressed: _search,
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.pink,
+                  ),
+                  child: const Text('검색'),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _results.length,
+                    itemBuilder: (context, index) {
+                      var userData =
+                          _results[index].data() as Map<String, dynamic>;
+                      return ListTile(
+                        title: Text(
+                          userData['email'],
+                          style: TextStyle(
+                              color: Colors.grey[300]), // 이메일 텍스트를 밝은 회색으로
+                        ),
+                        subtitle: Text(userData['name'] ?? ''),
+                        trailing: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.black, // 버튼 텍스트를 검정색으로
+                          ),
+                          onPressed: () =>
+                              _sendFriendRequest(userData['email']),
+                          child: const Text('친구 요청'),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // 얇은 회색 선 추가
+                const Padding(
+                  padding: EdgeInsets.only(top: 16.0, bottom: 0),
+                  child: Divider(
+                    color: Color(0xFFBDBDBD),
+                    thickness: 0.7,
+                    height: 1,
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 8.0, bottom: 8.0),
+                  child: Align(
+                    alignment: Alignment.center,
+                    child: Text(
+                      '친구 관리',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w400,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: friends.isEmpty
+                      ? const Center(
+                          child: Text('친구가 없습니다.',
+                              style: TextStyle(color: Colors.black)))
+                      : ListView.builder(
+                          itemCount: friends.length,
+                          itemBuilder: (context, index) {
+                            String friendEmail = friends[index];
+                            return FutureBuilder<Map<String, String>>(
+                              future: _getFriendInfo(friendEmail),
+                              builder: (context, snapshot) {
+                                if (!snapshot.hasData)
+                                  return const SizedBox(height: 60);
+                                final friendName = snapshot.data!["name"]!;
+                                final email = snapshot.data!["email"]!;
+                                return ListTile(
+                                  title: Text(friendName,
+                                      style: const TextStyle(
+                                          color: Color.fromARGB(
+                                              255, 189, 187, 187),
+                                          fontSize: 16)),
+                                  subtitle: Text(email,
+                                      style: const TextStyle(
+                                          color: Colors.grey, fontSize: 12)),
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.chat,
+                                        color:
+                                            Color.fromARGB(255, 141, 203, 202)),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (_) => ChatRoomScreen(
+                                                friendEmail: friendEmail)),
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                )
               ],
             ),
           ),
-        ),
-        titleTextStyle: const TextStyle(color: Colors.white),
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              Color.fromARGB(255, 0, 57, 47),
-              Color.fromARGB(255, 85, 27, 79),
-            ],
-          ),
-        ),
-        padding: const EdgeInsets.all(15),
-        child: Column(
-          children: [
-            const SizedBox(height: 50),
-            TextField(
-              controller: _searchController,
-              decoration: const InputDecoration(
-                labelText: '사용자 이메일 검색',
-                labelStyle: TextStyle(color: Colors.white),
-              ),
-              style: const TextStyle(color: Colors.white),
-              cursorColor: Colors.white,
-              onTap: () {
-                setState(() {
-                  _searchController.clear();
-                });
-              },
-            ),
-            TextButton(
-              onPressed: _search,
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.pink,
-              ),
-              child: const Text('검색'),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _results.length,
-                itemBuilder: (context, index) {
-                  var userData = _results[index].data() as Map<String, dynamic>;
-                  return ListTile(
-                    title: Text(
-                      userData['email'],
-                      style: TextStyle(
-                          color: Colors.grey[300]), // 이메일 텍스트를 밝은 회색으로
-                    ),
-                    subtitle: Text(userData['name'] ?? ''),
-                    trailing: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.black, // 버튼 텍스트를 검정색으로
-                      ),
-                      onPressed: () => _sendFriendRequest(userData['email']),
-                      child: const Text('친구 요청'),
-                    ),
-                  );
-                },
-              ),
-            ),
-            Expanded(
-              child: friends.isEmpty
-                  ? const Center(
-                      child: Text('친구가 없습니다.',
-                          style: TextStyle(color: Colors.black)))
-                  : ListView.builder(
-                      itemCount: friends.length,
-                      itemBuilder: (context, index) {
-                        String friendEmail = friends[index];
-                        return FutureBuilder<Map<String, String>>(
-                          future: _getFriendInfo(friendEmail),
-                          builder: (context, snapshot) {
-                            if (!snapshot.hasData)
-                              return const SizedBox(height: 60);
-                            final friendName = snapshot.data!["name"]!;
-                            final email = snapshot.data!["email"]!;
-                            return ListTile(
-                              title: Text(friendName,
-                                  style: const TextStyle(
-                                      color: Colors.black, fontSize: 16)),
-                              subtitle: Text(email,
-                                  style: const TextStyle(
-                                      color: Colors.grey, fontSize: 12)),
-                              trailing: IconButton(
-                                icon:
-                                    const Icon(Icons.chat, color: Colors.black),
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (_) => ChatRoomScreen(
-                                            friendEmail: friendEmail)),
-                                  );
-                                },
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-            )
-          ],
-        ),
-      ),
+        );
+      },
     );
   }
 }
