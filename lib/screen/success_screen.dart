@@ -61,12 +61,19 @@ class _SuccessScreenState extends State<SuccessScreen> {
     });
   }
 
-  void _handleSetTodayStatus(int status) {
+  void _handleSetTodayStatus(int status) async {
     setState(() {
       _todayStatus = status;
       _showTodayStatusSelector = false;
     });
-    // Firestore 저장 등 기존 로직 필요시 추가
+    // Firestore에 저장
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await FirebaseFirestore.instance
+          .collection('today_status')
+          .doc(user.uid)
+          .set({'status': status});
+    }
   }
 
   @override
@@ -83,6 +90,27 @@ class _SuccessScreenState extends State<SuccessScreen> {
           .fetchFriends()
           .then((_) {});
     });
+    _loadTodayStatusFromFirestore(); // Firestore에서 상태 불러오기
+  }
+
+  // Firestore에서 내 todayStatus 불러오기
+  Future<void> _loadTodayStatusFromFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final doc = await FirebaseFirestore.instance
+        .collection('today_status')
+        .doc(user.uid)
+        .get();
+    if (doc.exists) {
+      final data = doc.data();
+      setState(() {
+        _todayStatus = data?['status'] as int? ?? 0;
+      });
+    } else {
+      setState(() {
+        _todayStatus = 0;
+      });
+    }
   }
 
   @override
@@ -328,11 +356,16 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   String? _userDocProfileText;
   Color? _userDocProfileColor;
 
+  List<Map<String, dynamic>> _friendProfiles = [];
+
   @override
   void initState() {
     super.initState();
     final loginProvider = Provider.of<LoginProvider>(context, listen: false);
-    loginProvider.fetchFriends().then((_) => _loadAllProfiles());
+    loginProvider.fetchFriends().then((_) {
+      _loadAllProfiles();
+      _loadFriendProfiles(); // 반드시 fetchFriends 이후에 호출
+    });
     _loadTodayStatus();
     _loadUserProfileFromFirestore();
   }
@@ -432,6 +465,63 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
     }
   }
 
+  Future<void> _loadFriendProfiles() async {
+    final loginProvider = Provider.of<LoginProvider>(context, listen: false);
+    final List<Map<String, dynamic>> friendProfiles = [];
+    for (final email in loginProvider.friends) {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: email)
+          .limit(1)
+          .get();
+      if (query.docs.isNotEmpty) {
+        final data = query.docs.first.data();
+        int todayStatus = 0;
+        try {
+          final todayStatusDoc = await FirebaseFirestore.instance
+              .collection('today_status')
+              .doc(query.docs.first.id)
+              .get();
+          if (todayStatusDoc.exists) {
+            todayStatus = todayStatusDoc.data()?['status'] ?? 0;
+          }
+        } catch (_) {}
+        friendProfiles.add({
+          'displayName': data['name'] ?? '사용자',
+          'photoURL': data['profileUrl'] ?? '',
+          'profileText': data['profileText'],
+          'profileColor': data['profileColor'],
+          'todayStatus': todayStatus,
+        });
+      }
+    }
+    setState(() {
+      _friendProfiles = friendProfiles;
+    });
+  }
+
+  String _friendTodayStatusText(int? status) {
+    switch (status) {
+      case 1:
+        return "바쁨";
+      case 2:
+        return "휴식 중";
+      default:
+        return "만나자";
+    }
+  }
+
+  Color _friendTodayStatusColor(int? status) {
+    switch (status) {
+      case 1:
+        return Colors.orange;
+      case 2:
+        return Colors.blueGrey;
+      default:
+        return Colors.green;
+    }
+  }
+
   void _toggleTodayStatusSelector() {
     widget.onShowTodayStatusSelector();
   }
@@ -486,62 +576,146 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.only(left: 16, right: 40),
             child: Row(
-              children: List.generate(allProfiles.length, (idx) {
-                final p = allProfiles[idx];
-                final isMe = p['isMe'] == true;
-                Color? profileColor;
-                final colorStr = p['profileColor'];
-                if (colorStr is String &&
-                    colorStr.startsWith('#') &&
-                    colorStr.length == 7) {
-                  profileColor = Color(
-                      int.parse(colorStr.substring(1), radix: 16) + 0xFF000000);
-                } else if (colorStr is String && colorStr.length > 1) {
-                  profileColor = Color(int.parse(colorStr));
-                }
-                return Padding(
-                  padding: EdgeInsets.only(
-                      right: idx == allProfiles.length - 1 ? 0 : 18),
-                  child: Column(
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          GestureDetector(
-                            onTap: isMe
-                                ? () {
-                                    _toggleTodayStatusSelector();
-                                  }
-                                : null,
-                            child: Container(
-                              decoration: BoxDecoration(
+              children: [
+                Column(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            _toggleTodayStatusSelector();
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: null,
+                            ),
+                            child: CircleAvatar(
+                              radius: 24,
+                              backgroundColor:
+                                  _userDocProfileColor ?? Colors.teal,
+                              backgroundImage: (_userDocProfileUrl != null &&
+                                      _userDocProfileUrl!.isNotEmpty)
+                                  ? NetworkImage(_userDocProfileUrl!)
+                                  : null,
+                              child: (_userDocProfileUrl == null ||
+                                      _userDocProfileUrl!.isEmpty)
+                                  ? Text(
+                                      _userDocProfileText ?? '🙂',
+                                      style: const TextStyle(
+                                        fontSize: 22,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: -32,
+                          left: -12,
+                          right: -12,
+                          child: Center(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onTap: null,
+                                child: Container(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 240,
+                                    minWidth: 120,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 28, vertical: 14),
+                                  decoration: BoxDecoration(
+                                    color: _todayStatusColor.withOpacity(0.9),
+                                    borderRadius: BorderRadius.circular(22),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.08),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.today,
+                                          color: Colors.white, size: 40),
+                                      const SizedBox(width: 10),
+                                      Flexible(
+                                        child: Text(
+                                          _todayStatusText,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 33,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: 54,
+                      child: Text(
+                        '나',
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ),
+                ..._friendProfiles.map((f) {
+                  Color? profileColor;
+                  final colorStr = f['profileColor'];
+                  if (colorStr is String &&
+                      colorStr.startsWith('#') &&
+                      colorStr.length == 7) {
+                    profileColor = Color(
+                        int.parse(colorStr.substring(1), radix: 16) +
+                            0xFF000000);
+                  } else if (colorStr is String && colorStr.length > 1) {
+                    profileColor = Color(int.parse(colorStr));
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 18),
+                    child: Column(
+                      children: [
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              decoration: const BoxDecoration(
                                 shape: BoxShape.circle,
                                 border: null,
                               ),
                               child: CircleAvatar(
                                 radius: 24,
-                                backgroundColor: (isMe
-                                    ? (_userDocProfileColor ?? Colors.teal)
-                                    : profileColor ?? Colors.grey[700]),
-                                backgroundImage: (isMe
-                                    ? (_userDocProfileUrl != null &&
-                                            _userDocProfileUrl!.isNotEmpty)
-                                        ? NetworkImage(_userDocProfileUrl!)
-                                        : null
-                                    : (p['photoURL'] != null &&
-                                            (p['photoURL'] as String)
-                                                .isNotEmpty)
-                                        ? NetworkImage(p['photoURL'])
-                                        : null),
-                                child: (isMe
-                                        ? (_userDocProfileUrl == null ||
-                                            _userDocProfileUrl!.isEmpty)
-                                        : (p['photoURL'] == null ||
-                                            (p['photoURL'] as String).isEmpty))
+                                backgroundColor:
+                                    profileColor ?? Colors.grey[700],
+                                backgroundImage: (f['photoURL'] != null &&
+                                        (f['photoURL'] as String).isNotEmpty)
+                                    ? NetworkImage(f['photoURL'])
+                                    : null,
+                                child: (f['photoURL'] == null ||
+                                        (f['photoURL'] as String).isEmpty)
                                     ? Text(
-                                        isMe
-                                            ? (_userDocProfileText ?? '🙂')
-                                            : (p['profileText'] ?? '🙂'),
+                                        f['profileText'] ?? '🙂',
                                         style: const TextStyle(
                                           fontSize: 22,
                                           color: Colors.white,
@@ -551,8 +725,6 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
                                     : null,
                               ),
                             ),
-                          ),
-                          if (isMe)
                             Positioned(
                               top: -32,
                               left: -12,
@@ -560,71 +732,68 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
                               child: Center(
                                 child: FittedBox(
                                   fit: BoxFit.scaleDown,
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.translucent,
-                                    // 말풍선은 터치해도 아무 동작 없음
-                                    onTap: null,
-                                    child: Container(
-                                      constraints: const BoxConstraints(
-                                        maxWidth: 240,
-                                        minWidth: 120,
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 28, vertical: 14),
-                                      decoration: BoxDecoration(
-                                        color:
-                                            _todayStatusColor.withOpacity(0.9),
-                                        borderRadius: BorderRadius.circular(22),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color:
-                                                Colors.black.withOpacity(0.08),
-                                            blurRadius: 4,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.today,
-                                              color: Colors.white, size: 40),
-                                          const SizedBox(width: 10),
-                                          Flexible(
-                                            child: Text(
-                                              _todayStatusText,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 33,
-                                                fontWeight: FontWeight.bold,
-                                              ),
+                                  child: Container(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 240,
+                                      minWidth: 120,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 28, vertical: 14),
+                                    decoration: BoxDecoration(
+                                      color: _friendTodayStatusColor(
+                                              f['todayStatus'])
+                                          .withOpacity(0.9),
+                                      borderRadius: BorderRadius.circular(22),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.08),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.today,
+                                            color: Colors.white, size: 40),
+                                        const SizedBox(width: 10),
+                                        Flexible(
+                                          child: Text(
+                                            _friendTodayStatusText(
+                                                f['todayStatus']),
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 33,
+                                              fontWeight: FontWeight.bold,
                                             ),
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      SizedBox(
-                        width: 54,
-                        child: Text(
-                          p['displayName'],
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          width: 54,
+                          child: Text(
+                            f['displayName'] ?? '',
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
             ),
           ),
         ],
