@@ -684,7 +684,9 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
                     ),
                   ],
                 ),
-                ..._friendProfiles.map((f) {
+                ..._friendProfiles.asMap().entries.map((entry) {
+                  final f = entry.value;
+                  final idx = entry.key;
                   Color? profileColor;
                   final colorStr = f['profileColor'];
                   if (colorStr is String &&
@@ -697,7 +699,7 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
                     profileColor = Color(int.parse(colorStr));
                   }
                   return Padding(
-                    padding: const EdgeInsets.only(left: 18),
+                    padding: EdgeInsets.only(left: idx == -1 ? 18 : 21),
                     child: Column(
                       children: [
                         Stack(
