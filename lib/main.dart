@@ -41,6 +41,11 @@ class PlangramApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loginProvider = Provider.of<LoginProvider>(context, listen: false);
+    // 앱 시작 시 currentUser() 호출로 friends 정보 항상 유지
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      loginProvider.currentUser();
+    });
     final initialRoute =
         FirebaseAuth.instance.currentUser != null ? '/success' : '/login';
     return MaterialApp(

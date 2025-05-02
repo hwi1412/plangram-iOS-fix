@@ -38,6 +38,9 @@ class LoginProvider with ChangeNotifier {
 
   void currentUser() {
     _user = FirebaseAuth.instance.currentUser;
+    if (_user != null) {
+      fetchFriends(); // 앱 재시작/새로고침 시에도 friends 즉시 불러오기
+    }
     notifyListeners();
   }
 

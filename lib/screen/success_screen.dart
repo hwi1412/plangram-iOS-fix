@@ -361,13 +361,17 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   @override
   void initState() {
     super.initState();
-    final loginProvider = Provider.of<LoginProvider>(context, listen: false);
-    loginProvider.fetchFriends().then((_) {
-      _loadAllProfiles();
-      _loadFriendProfiles(); // 반드시 fetchFriends 이후에 호출
-    });
+    _fetchAndLoadProfiles();
     _loadTodayStatus();
     _loadUserProfileFromFirestore();
+  }
+
+  Future<void> _fetchAndLoadProfiles() async {
+    final loginProvider = Provider.of<LoginProvider>(context, listen: false);
+    // fetchFriends가 완료된 후에만 친구 프로필을 불러오도록 순서 보장
+    await loginProvider.fetchFriends();
+    await _loadAllProfiles();
+    await _loadFriendProfiles();
   }
 
   Future<void> _loadUserProfileFromFirestore() async {
@@ -529,7 +533,7 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   String get _todayStatusText {
     switch (widget.todayStatus) {
       case 1:
-        return "바쁨";
+        return "바빠요";
       case 2:
         return "휴식 중";
       default:
