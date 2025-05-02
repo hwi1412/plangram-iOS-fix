@@ -276,7 +276,7 @@ class _SuccessScreenState extends State<SuccessScreen> {
                         _TodayStatusOption(
                           icon: Icons.block,
                           color: Colors.orange,
-                          text: "바쁨",
+                          text: "바빠요",
                           selected: _todayStatus == 1,
                           onTap: () => _handleSetTodayStatus(1),
                         ),
@@ -507,7 +507,7 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
   String _friendTodayStatusText(int? status) {
     switch (status) {
       case 1:
-        return "바쁨";
+        return "바빠요";
       case 2:
         return "휴식 중";
       default:
