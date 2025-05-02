@@ -380,7 +380,7 @@ class _TodoScreenState extends State<TodoScreen> {
           'To Do',
           style: TextStyle(color: Colors.grey.shade300),
         ),
-        backgroundColor: const Color.fromARGB(255, 32, 29, 42),
+        backgroundColor: const Color.fromARGB(255, 25, 25, 37),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () {
@@ -594,35 +594,23 @@ class _TodoScreenState extends State<TodoScreen> {
                     filled: true,
                     fillColor: Colors.white10,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(18),
-                        topRight: Radius.circular(18),
-                        bottomLeft: Radius.circular(0),
-                        bottomRight: Radius.circular(0),
-                      ),
+                      borderRadius:
+                          BorderRadius.all(Radius.circular(18)), // 모든 모서리 둥글게
                       borderSide: const BorderSide(color: Colors.white),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(18),
-                        topRight: Radius.circular(18),
-                        bottomLeft: Radius.circular(0),
-                        bottomRight: Radius.circular(0),
-                      ),
+                      borderRadius:
+                          BorderRadius.all(Radius.circular(18)), // 모든 모서리 둥글게
                       borderSide: const BorderSide(color: Colors.white),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(18),
-                        topRight: Radius.circular(18),
-                        bottomLeft: Radius.circular(0),
-                        bottomRight: Radius.circular(0),
-                      ),
+                      borderRadius:
+                          BorderRadius.all(Radius.circular(18)), // 모든 모서리 둥글게
                       borderSide:
                           const BorderSide(color: Colors.white, width: 2),
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                        vertical: 12, horizontal: 16),
+                        vertical: 12, horizontal: 22),
                   ),
                   onSubmitted: (value) {
                     if (value.isNotEmpty) {

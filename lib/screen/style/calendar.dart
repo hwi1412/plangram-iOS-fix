@@ -17,6 +17,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
   final ValueNotifier<List<DateTime>> _friendSelectedDates = ValueNotifier([]);
   bool isEditing = false;
   DateTime? _selectedDetailDay;
+  DateTime _focusedDay = DateTime.now(); // 추가: 현재 포커스된 달 상태
 
   // SuccessScreen에서 접근할 수 있도록 getter 추가
   DateTime? get selectedDetailDay => _selectedDetailDay;
@@ -97,6 +98,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
       for (var doc in snapshot.docs) {
         final data = doc.data();
         final scheduleEmail = data['userEmail'] as String?;
+        // mutualFriendEmails에 포함된 친구의 일정만 추가
         if (scheduleEmail != null &&
             mutualFriendEmails.contains(scheduleEmail)) {
           friendDates.add((data['date'] as Timestamp).toDate());
@@ -128,6 +130,9 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
             .where((day) => !isSameDay(day, selectedDay))
             .toList();
       }
+      setState(() {
+        _focusedDay = focusedDay; // 선택 시 포커스도 이동
+      });
     } else {
       if (_selectedDetailDay != null &&
           isSameDay(_selectedDetailDay, selectedDay)) {
@@ -137,6 +142,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
       } else {
         setState(() {
           _selectedDetailDay = selectedDay;
+          _focusedDay = focusedDay; // 선택 시 포커스도 이동
         });
         _fetchUsersForDay(selectedDay);
       }
@@ -144,6 +150,33 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
   }
 
   Future<void> _fetchUsersForDay(DateTime day) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    final currentUserEmail = currentUser.email;
+    final currentUserDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(currentUser.uid)
+        .get();
+    final List<dynamic> friendEmailsDynamic =
+        currentUserDoc.data()?["friends"] ?? [];
+    final List<String> friendEmails =
+        friendEmailsDynamic.map((e) => e.toString()).toList();
+
+    List<String> mutualFriendEmails = [];
+    for (String email in friendEmails) {
+      var queryResult = await FirebaseFirestore.instance
+          .collection("users")
+          .where("email", isEqualTo: email)
+          .get();
+      if (queryResult.docs.isNotEmpty) {
+        var friendData = queryResult.docs.first.data();
+        List<dynamic> friendFriends = friendData["friends"] ?? [];
+        if (friendFriends.contains(currentUserEmail)) {
+          mutualFriendEmails.add(email);
+        }
+      }
+    }
+
     final start = DateTime(day.year, day.month, day.day);
     final end = start
         .add(const Duration(days: 1))
@@ -158,8 +191,13 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
       final data = doc.data();
       final name =
           (data['userName'] as String?) ?? (data['userEmail'] as String?);
-      if (name != null && name.isNotEmpty) {
-        users.add(name);
+      final userEmail = data['userEmail'] as String?;
+      // 본인 또는 mutualFriendEmails에 포함된 친구만 추가
+      if (userEmail == currentUserEmail ||
+          (userEmail != null && mutualFriendEmails.contains(userEmail))) {
+        if (name != null && name.isNotEmpty) {
+          users.add(name);
+        }
       }
     }
     setState(() {
@@ -248,7 +286,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
                 return TableCalendar(
                   firstDay: DateTime.utc(2020, 10, 16),
                   lastDay: DateTime.utc(2030, 3, 14),
-                  focusedDay: DateTime.now(),
+                  focusedDay: _focusedDay, // 변경: 상태 변수 사용
                   startingDayOfWeek: StartingDayOfWeek.monday,
                   headerStyle: HeaderStyle(
                     titleTextFormatter: (date, locale) =>
