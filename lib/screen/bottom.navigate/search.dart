@@ -233,12 +233,15 @@ class _SearchScreenState extends State<SearchScreen>
                     ),
                   ),
                 ),
-                Expanded(
+                Flexible(
+                  fit: FlexFit.loose,
                   child: friends.isEmpty
                       ? const Center(
                           child: Text('친구가 없습니다.',
                               style: TextStyle(color: Colors.black)))
                       : ListView.builder(
+                          shrinkWrap: true,
+                          padding: EdgeInsets.zero,
                           itemCount: friends.length,
                           itemBuilder: (context, index) {
                             String friendEmail = friends[index];
@@ -258,18 +261,68 @@ class _SearchScreenState extends State<SearchScreen>
                                   subtitle: Text(email,
                                       style: const TextStyle(
                                           color: Colors.grey, fontSize: 12)),
-                                  trailing: IconButton(
-                                    icon: const Icon(Icons.chat,
-                                        color:
-                                            Color.fromARGB(255, 141, 203, 202)),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                            builder: (_) => ChatRoomScreen(
-                                                friendEmail: friendEmail)),
-                                      );
-                                    },
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.person_remove,
+                                            color: Colors.red),
+                                        tooltip: '친구 끊기',
+                                        onPressed: () async {
+                                          User? currentUser =
+                                              FirebaseAuth.instance.currentUser;
+                                          if (currentUser == null) return;
+                                          // 내 friends에서 삭제
+                                          await FirebaseFirestore.instance
+                                              .collection("users")
+                                              .doc(currentUser.uid)
+                                              .update({
+                                            'friends': FieldValue.arrayRemove(
+                                                [friendEmail])
+                                          });
+                                          // 상대방 friends에서도 나를 삭제 (옵션)
+                                          await FirebaseFirestore.instance
+                                              .collection("users")
+                                              .where("email",
+                                                  isEqualTo: friendEmail)
+                                              .get()
+                                              .then((snapshot) async {
+                                            if (snapshot.docs.isNotEmpty) {
+                                              await FirebaseFirestore.instance
+                                                  .collection("users")
+                                                  .doc(snapshot.docs.first.id)
+                                                  .update({
+                                                'friends':
+                                                    FieldValue.arrayRemove(
+                                                        [currentUser.email])
+                                              });
+                                            }
+                                          });
+                                          setState(() {
+                                            friends.removeAt(index);
+                                          });
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                                content:
+                                                    Text('친구 연결이 해제되었습니다.')),
+                                          );
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.chat,
+                                            color: Color.fromARGB(
+                                                255, 141, 203, 202)),
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                                builder: (_) => ChatRoomScreen(
+                                                    friendEmail: friendEmail)),
+                                          );
+                                        },
+                                      ),
+                                    ],
                                   ),
                                 );
                               },
