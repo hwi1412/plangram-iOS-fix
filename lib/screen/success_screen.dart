@@ -226,14 +226,14 @@ class _SuccessScreenState extends State<SuccessScreen> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              _LegendRow(color: Colors.red, text: '나만 쉬는 날'),
+                              _LegendRow(color: Colors.red, text: '내 휴무일'),
                               const SizedBox(height: 8),
                               _LegendRow(
-                                  color: Color(0xFF1DE9B6), text: '친구도 쉬는 날'),
+                                  color: Color(0xFF1DE9B6), text: '공동 휴무일'),
                               const SizedBox(height: 8),
-                              _LegendRow(color: Colors.grey, text: '친구만 쉬는 날'),
+                              _LegendRow(color: Colors.grey, text: '친구 휴무일'),
                               const SizedBox(height: 8),
-                              _LegendRow(color: Colors.purple, text: 'Today'),
+                              _LegendRow(color: Colors.purple, text: '오늘'),
                             ],
                           ),
                         ),
@@ -268,7 +268,7 @@ class _SuccessScreenState extends State<SuccessScreen> {
                         _TodayStatusOption(
                           icon: Icons.check_circle,
                           color: Colors.green,
-                          text: "만나자",
+                          text: "만나요",
                           selected: _todayStatus == 0,
                           onTap: () => _handleSetTodayStatus(0),
                         ),
@@ -511,7 +511,7 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
       case 2:
         return "휴식 중";
       default:
-        return "만나자";
+        return "만나요";
     }
   }
 
@@ -537,7 +537,7 @@ class _ProfileCircleListState extends State<_ProfileCircleList> {
       case 2:
         return "휴식 중";
       default:
-        return "만나자";
+        return "만나요";
     }
   }
 

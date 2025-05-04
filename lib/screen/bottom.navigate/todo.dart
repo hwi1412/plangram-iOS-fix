@@ -377,7 +377,7 @@ class _TodoScreenState extends State<TodoScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'To Do',
+          "Let's Do", // 변경된 부분: 제목 수정
           style: TextStyle(color: Colors.grey.shade300),
         ),
         backgroundColor: const Color.fromARGB(255, 25, 25, 37),

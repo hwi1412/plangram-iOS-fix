@@ -427,7 +427,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${_selectedDetailDay!.year}-${_selectedDetailDay!.month}-${_selectedDetailDay!.day} 선택 사용자:',
+                  '${_selectedDetailDay!.month}월 ${_selectedDetailDay!.day}일 휴무 중인 친구:',
                   style: const TextStyle(
                       color: Colors.white, fontWeight: FontWeight.bold),
                 ),
@@ -458,7 +458,7 @@ class PlangramHomePageContentState extends State<PlangramHomePageContent> {
                         const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
                   ),
                   child: const Text(
-                    '채팅방 만들기',
+                    '약속방 생성',
                     style: TextStyle(fontSize: 17),
                   ),
                 )
