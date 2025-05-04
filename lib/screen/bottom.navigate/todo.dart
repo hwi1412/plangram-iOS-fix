@@ -1,14 +1,22 @@
 import 'package:cloud_firestore/cloud_firestore.dart'; // 추가된 import
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
-// 새로 추가된 임포트
+import 'package:firebase_auth/firebase_auth.dart'; // 추가된 import
+
+// 새 클래스 Group 추가
+class Group {
+  String name;
+  List<String> members;
+  Group({required this.name, required this.members});
+}
 
 // 새 클래스 TodoItem 추가 (Firestore 문서 id 필드 추가)
 class TodoItem {
   String text;
   bool completed;
   String? id; // Firestore 문서 id
-  TodoItem(this.text, {this.completed = false, this.id});
+  String? group; // 할 일에 속한 그룹 (null이면 전체)
+  TodoItem(this.text, {this.completed = false, this.id, this.group});
 }
 
 class TodoScreen extends StatefulWidget {
@@ -27,12 +35,22 @@ class _TodoScreenState extends State<TodoScreen> {
   // 날짜별 To-Do 리스트를 저장하는 상태 변수
   final Map<DateTime, List<TodoItem>> _events = {};
 
-  // 선택된 날짜의 To-Do 리스트 getter (완료 항목은 맨 아래)
+  // 그룹 관련 상태 변수 수정
+  List<Group> _groups = [];
+  String _selectedGroup = "전체 보기"; // 기본 전체보기
+
+  // 선택된 날짜의 To-Do 리스트 getter (그룹 필터 적용)
   List<TodoItem> get _selectedEvents {
     final events = _events[_selectedDay] ?? <TodoItem>[];
-    final sorted = List<TodoItem>.from(events);
-    sorted.sort((a, b) => (a.completed ? 1 : 0).compareTo(b.completed ? 1 : 0));
-    return sorted;
+    if (_selectedGroup == "My") {
+      return events.where((e) => e.group == "MY").toList();
+    }
+    final filtered = _selectedGroup == "전체 보기"
+        ? events
+        : events.where((e) => e.group == _selectedGroup).toList();
+    filtered
+        .sort((a, b) => (a.completed ? 1 : 0).compareTo(b.completed ? 1 : 0));
+    return filtered;
   }
 
   // 새 입력을 위한 텍스트 컨트롤러 추가
@@ -45,16 +63,38 @@ class _TodoScreenState extends State<TodoScreen> {
 
   // Firestore에서 저장된 todo list들을 불러오는 함수
   Future<void> _loadTodosFromFirestore() async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    String currentEmail = currentUser.email!;
     QuerySnapshot snapshot =
         await FirebaseFirestore.instance.collection("todos").get();
     Map<DateTime, List<TodoItem>> loadedEvents = {};
     for (var doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       String dateStr = data["date"] ?? "";
-      DateTime date = DateTime.parse(dateStr); // ISO 형식이면 바로 파싱
-      date = DateTime(date.year, date.month, date.day); // 정규화
-      TodoItem todo = TodoItem(data["text"],
-          completed: data["completed"] ?? false, id: doc.id);
+      DateTime date = DateTime.parse(dateStr);
+      date = DateTime(date.year, date.month, date.day);
+      String? docGroup = data["group"]; // "MY", 특정 그룹, 혹은 null
+      String? creator = data["creator"];
+      // 접근 권한 체크:
+      if (docGroup == "MY") {
+        // 개인 todo: 본인이 작성한 경우만 표시
+        if (creator != currentEmail) continue;
+      } else if (docGroup != null) {
+        // 그룹 todo: 해당 그룹의 구성원이면 표시 (작성자와 상관없이)
+        var group = _groups.firstWhere((g) => g.name == docGroup,
+            orElse: () => Group(name: docGroup, members: []));
+        if (!group.members.contains(currentEmail)) continue;
+      } else {
+        // 그룹 필드가 null이면 개인 todo로 간주
+        if (creator != currentEmail) continue;
+      }
+      TodoItem todo = TodoItem(
+        data["text"],
+        completed: data["completed"] ?? false,
+        id: doc.id,
+        group: data["group"],
+      );
       if (loadedEvents[date] == null) {
         loadedEvents[date] = [];
       }
@@ -66,24 +106,104 @@ class _TodoScreenState extends State<TodoScreen> {
     });
   }
 
+  // Firestore에서 그룹 정보를 불러오는 함수
+  Future<void> _loadGroups() async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    Set<String> groupNames = {};
+    List<Group> loadedGroups = [];
+    // Firestore group_chat_rooms에서 불러오기
+    QuerySnapshot chatSnapshot = await FirebaseFirestore.instance
+        .collection("group_chat_rooms")
+        .where("members", arrayContains: currentUser.email)
+        .get();
+    for (var doc in chatSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      String roomName = data["roomName"] ?? "";
+      if (roomName.isNotEmpty && !groupNames.contains(roomName)) {
+        groupNames.add(roomName);
+        // "members" 필드를 읽어 그룹 멤버 리스트로 저장
+        List<String> members = List<String>.from(data["members"] ?? []);
+        loadedGroups.add(Group(name: roomName, members: members));
+      }
+    }
+    // 사용자의 groups 서브컬렉션(맵.dart에서 생성된 그룹)에서 불러오기
+    QuerySnapshot mapGroupsSnapshot = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(currentUser.uid)
+        .collection("groups")
+        .get();
+    for (var doc in mapGroupsSnapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      String groupName = data["groupName"] ?? "";
+      if (groupName.isNotEmpty && !groupNames.contains(groupName)) {
+        groupNames.add(groupName);
+        List<String> members = List<String>.from(data["members"] ?? []);
+        loadedGroups.add(Group(name: groupName, members: members));
+      }
+    }
+    setState(() {
+      _groups = loadedGroups;
+    });
+  }
+
+  // 현재 사용자의 친구 목록을 불러오는 헬퍼 함수
+  Future<List<String>> _getFriendList() async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return [];
+    var userDoc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(currentUser.uid)
+        .get();
+    List<String> friendEmails =
+        List<String>.from(userDoc.data()?["friends"] ?? []);
+    List<String> friendNames = [];
+    for (var email in friendEmails) {
+      QuerySnapshot query = await FirebaseFirestore.instance
+          .collection("users")
+          .where("email", isEqualTo: email)
+          .limit(1)
+          .get();
+      if (query.docs.isNotEmpty) {
+        friendNames.add(
+            (query.docs.first.data() as Map<String, dynamic>)["name"] ?? email);
+      } else {
+        friendNames.add(email);
+      }
+    }
+    return friendNames;
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadGroups(); // 그룹 로드 추가
     _loadTodosFromFirestore();
   }
 
-  void _addTodoItem(String todo) {
+  void _addTodoItem(String todo) async {
     final dateString = _formatDate(_selectedDay);
-    FirebaseFirestore.instance.collection("todos").add({
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    // "creator" 필드 추가
+    await FirebaseFirestore.instance.collection("todos").add({
       "date": dateString,
       "text": todo,
       "completed": false,
+      "group": _selectedGroup == "전체 보기"
+          ? null
+          : (_selectedGroup == "My" ? "MY" : _selectedGroup),
+      "creator": currentUser.email,
     }).then((docRef) {
       setState(() {
         if (_events[_selectedDay] == null) {
           _events[_selectedDay] = [];
         }
-        _events[_selectedDay]!.add(TodoItem(todo, id: docRef.id));
+        _events[_selectedDay]!.add(TodoItem(todo,
+            id: docRef.id,
+            group: _selectedGroup == "전체 보기"
+                ? null
+                : (_selectedGroup == "My" ? "MY" : _selectedGroup)));
       });
     });
   }
@@ -98,276 +218,148 @@ class _TodoScreenState extends State<TodoScreen> {
     }
   }
 
-  // 모달 바닥 시트로 수정 옵션을 제공하는 메서드 수정 (하단 옵션 버튼 행 변경)
-  void _showEditOptions() {
-    final Set<int> selectedIndices = {};
+  // 그룹 생성/수정 모달
+  void _showGroupModal({Group? group}) {
+    final TextEditingController groupController =
+        TextEditingController(text: group?.name ?? "");
+    final Set<String> selectedMembers = Set.from(group?.members ?? []);
     showModalBottomSheet(
-      backgroundColor: const Color.fromARGB(255, 36, 35, 65),
       context: context,
+      backgroundColor: const Color.fromARGB(255, 36, 35, 65),
+      isScrollControlled: true,
       builder: (context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 헤더 영역: 좌측 '전체 삭제', 중앙 텍스트, 우측 '수정'
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0, vertical: 16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      TextButton(
-                        onPressed: () {
-                          // 전체 삭제: 오늘 할 일 모두 삭제 및 Firestore 삭제
-                          final currentEvents = _events[_selectedDay] ?? [];
-                          for (var item in currentEvents) {
-                            if (item.id != null) {
-                              FirebaseFirestore.instance
-                                  .collection("todos")
-                                  .doc(item.id)
-                                  .delete();
-                            }
-                          }
-                          setState(() {
-                            _events[_selectedDay] = [];
-                          });
-                          Navigator.pop(context);
-                        },
-                        style:
-                            TextButton.styleFrom(foregroundColor: Colors.white),
-                        child: const Text("전체 삭제"),
-                      ),
-                      const Text(
-                        "수정 옵션 선택",
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          // 수정: 단일 항목 선택 시 수정 팝업 호출
-                          if (selectedIndices.length == 1) {
-                            final index = selectedIndices.first;
-                            final item = _selectedEvents[index];
-                            TextEditingController editController =
-                                TextEditingController(text: item.text);
-                            showDialog(
-                              context: context,
-                              builder: (context) {
-                                return AlertDialog(
-                                  title: const Text("할 일 수정"),
-                                  content: TextField(
-                                    controller: editController,
-                                    decoration: const InputDecoration(
-                                      hintText: "수정할 내용을 입력하세요",
-                                    ),
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () {
-                                        Navigator.pop(context);
-                                      },
-                                      child: const Text("취소"),
-                                    ),
-                                    TextButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          item.text = editController.text;
-                                          // Firestore 수정 업데이트
-                                          if (item.id != null) {
-                                            FirebaseFirestore.instance
-                                                .collection("todos")
-                                                .doc(item.id)
-                                                .update({"text": item.text});
-                                          }
-                                        });
-                                        Navigator.pop(context);
-                                        Navigator.pop(context);
-                                      },
-                                      child: const Text("수정"),
-                                    ),
-                                  ],
-                                );
-                              },
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text("수정은 하나의 항목만 선택하세요.")),
-                            );
-                          }
-                        },
-                        style:
-                            TextButton.styleFrom(foregroundColor: Colors.white),
-                        child: const Text("수정"),
-                      ),
-                    ],
+        return StatefulBuilder(builder: (context, modalSetState) {
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: groupController,
+                    decoration: const InputDecoration(
+                      labelText: "그룹명",
+                      labelStyle: TextStyle(color: Colors.white),
+                    ),
+                    style: const TextStyle(color: Colors.white),
                   ),
-                ),
-                // 체크박스로 선택하는 리스트
-                Expanded(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: _selectedEvents.length,
-                    itemBuilder: (context, index) {
-                      final item = _selectedEvents[index];
-                      final isSelected = selectedIndices.contains(index);
-                      return CheckboxListTile(
-                        value: isSelected,
-                        onChanged: (value) {
-                          setModalState(() {
-                            if (value == true) {
-                              selectedIndices.add(index);
-                            } else {
-                              selectedIndices.remove(index);
-                            }
-                          });
-                        },
-                        title: Text(
-                          item.text,
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                        activeColor: Colors.green,
-                        controlAffinity: ListTileControlAffinity.leading,
+                  const SizedBox(height: 10),
+                  // 친구(멤버) 선택 체크박스 목록 (현재 친구 목록 불러오기)
+                  FutureBuilder<List<String>>(
+                    future: _getFriendList(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final friendList = snapshot.data!;
+                      return Column(
+                        children: friendList.map((friend) {
+                          return CheckboxListTile(
+                            title: Text(friend,
+                                style: const TextStyle(color: Colors.white)),
+                            value: selectedMembers.contains(friend),
+                            activeColor: Colors.green,
+                            onChanged: (val) {
+                              modalSetState(() {
+                                if (val == true) {
+                                  selectedMembers.add(friend);
+                                } else {
+                                  selectedMembers.remove(friend);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
                       );
                     },
                   ),
-                ),
-                // 하단 옵션 버튼 행: 삭제, 복제, 이동, 취소
-                Wrap(
-                  alignment: WrapAlignment.spaceEvenly,
-                  children: [
-                    TextButton(
-                      onPressed: () {
-                        // 삭제: 선택된 항목들을 제거 및 Firestore 삭제
-                        final currentEvents = _events[_selectedDay] ?? [];
-                        currentEvents.removeWhere((item) {
-                          if (selectedIndices
-                              .contains(_selectedEvents.indexOf(item))) {
-                            if (item.id != null) {
-                              FirebaseFirestore.instance
-                                  .collection("todos")
-                                  .doc(item.id)
-                                  .delete();
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      if (group != null)
+                        TextButton(
+                          onPressed: () async {
+                            User? currentUser =
+                                FirebaseAuth.instance.currentUser;
+                            if (currentUser != null) {
+                              var query = await FirebaseFirestore.instance
+                                  .collection("users")
+                                  .doc(currentUser.uid)
+                                  .collection("groups")
+                                  .where("groupName", isEqualTo: group.name)
+                                  .get();
+                              for (var doc in query.docs) {
+                                await doc.reference.delete();
+                              }
                             }
-                            return true;
-                          }
-                          return false;
-                        });
-                        setState(() {
-                          _events[_selectedDay] = currentEvents;
-                        });
-                        Navigator.pop(context);
-                      },
-                      style:
-                          TextButton.styleFrom(foregroundColor: Colors.white),
-                      child: const Text("삭제"),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        // 복제: 선택된 항목들을 복제하여 추가 및 Firestore 추가
-                        final currentEvents = _events[_selectedDay] ?? [];
-                        final duplicates = _selectedEvents
-                            .asMap()
-                            .entries
-                            .where(
-                                (entry) => selectedIndices.contains(entry.key))
-                            .map((entry) {
-                          // Firestore 추가 시 duplicate (새 문서 생성)
-                          FirebaseFirestore.instance.collection("todos").add({
-                            "date": _formatDate(_selectedDay),
-                            "text": entry.value.text,
-                            "completed": false,
-                          }).then((docRef) {
                             setState(() {
-                              currentEvents.add(
-                                  TodoItem(entry.value.text, id: docRef.id));
-                              _events[_selectedDay] = currentEvents;
-                            });
-                          });
-                          return entry.value;
-                        }).toList();
-                        Navigator.pop(context);
-                      },
-                      style:
-                          TextButton.styleFrom(foregroundColor: Colors.white),
-                      child: const Text("복제"),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        DateTime? newDate = await showDatePicker(
-                          context: context,
-                          initialDate: _selectedDay,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2030),
-                        );
-                        if (newDate != null) {
-                          final normalizedNewDate = DateTime(
-                              newDate.year, newDate.month, newDate.day);
-                          // 이동할 항목들 가져오기
-                          final movingItems = _selectedEvents
-                              .asMap()
-                              .entries
-                              .where((entry) =>
-                                  selectedIndices.contains(entry.key))
-                              .map((entry) => entry.value)
-                              .toList();
-                          setState(() {
-                            // 현재 날짜에서 해당 항목 제거 + Firestore 업데이트 (삭제)
-                            final currentEvents = _events[_selectedDay] ?? [];
-                            currentEvents.removeWhere((item) {
-                              if (movingItems.contains(item)) {
-                                if (item.id != null) {
-                                  FirebaseFirestore.instance
-                                      .collection("todos")
-                                      .doc(item.id)
-                                      .delete();
-                                }
-                                return true;
+                              _groups.removeWhere((g) => g.name == group.name);
+                              if (_selectedGroup == group.name) {
+                                _selectedGroup = "전체 보기";
                               }
-                              return false;
                             });
-                            _events[_selectedDay] = currentEvents;
-                            // 이동할 날짜에 항목 추가 + Firestore 업데이트 (날짜 필드 업데이트)
-                            if (_events[normalizedNewDate] == null) {
-                              _events[normalizedNewDate] = [];
+                            Navigator.pop(context);
+                          },
+                          child: const Text("삭제",
+                              style: TextStyle(color: Colors.red)),
+                        ),
+                      TextButton(
+                        onPressed: () async {
+                          debugPrint("저장 버튼 클릭됨"); // 디버그 메시지
+                          if (groupController.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text("그룹명을 입력하세요.")));
+                            return;
+                          }
+                          User? currentUser = FirebaseAuth.instance.currentUser;
+                          if (currentUser == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text("사용자가 인증되지 않았습니다.")));
+                            return;
+                          }
+                          if (group != null) {
+                            // 기존 그룹 수정: Firestore 업데이트
+                            var query = await FirebaseFirestore.instance
+                                .collection("users")
+                                .doc(currentUser.uid)
+                                .collection("groups")
+                                .where("groupName", isEqualTo: group.name)
+                                .get();
+                            for (var doc in query.docs) {
+                              await doc.reference.update({
+                                "groupName": groupController.text.trim(),
+                                "members": selectedMembers.toList()
+                              });
                             }
-                            for (var item in movingItems) {
-                              if (item.id != null) {
-                                FirebaseFirestore.instance
-                                    .collection("todos")
-                                    .doc(item.id)
-                                    .update({
-                                  "date": _formatDate(normalizedNewDate)
-                                });
-                              }
-                              _events[normalizedNewDate]!.add(item);
-                            }
-                          });
+                          } else {
+                            // 신규 그룹 생성: Firestore에 저장 (독립적으로)
+                            await FirebaseFirestore.instance
+                                .collection("users")
+                                .doc(currentUser.uid)
+                                .collection("groups")
+                                .add({
+                              "groupName": groupController.text.trim(),
+                              "members": selectedMembers.toList(),
+                            });
+                          }
+                          await _loadGroups();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("그룹이 저장되었습니다.")));
                           Navigator.pop(context);
-                        }
-                      },
-                      style:
-                          TextButton.styleFrom(foregroundColor: Colors.white),
-                      child: const Text("이동"),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.pop(context); // 취소
-                      },
-                      style:
-                          TextButton.styleFrom(foregroundColor: Colors.white),
-                      child: const Text("취소"),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-              ],
-            );
-          },
-        );
+                        },
+                        child: const Text("저장",
+                            style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          );
+        });
       },
     );
   }
@@ -503,45 +495,67 @@ class _TodoScreenState extends State<TodoScreen> {
                   ),
                 ],
               ),
+              // 그룹 선택 바 (달력 바로 아래)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                child: Row(
+                  children: [
+                    // 추가: My 버튼
+                    ChoiceChip(
+                      label: const Text("My"),
+                      selected: _selectedGroup == "My",
+                      onSelected: (_) {
+                        setState(() {
+                          _selectedGroup = "My";
+                        });
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text("전체 보기"),
+                      selected: _selectedGroup == "전체 보기",
+                      onSelected: (_) {
+                        setState(() => _selectedGroup = "전체 보기");
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _groups.map((grp) {
+                            return Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: GestureDetector(
+                                onLongPress: () => _showGroupModal(group: grp),
+                                child: ChoiceChip(
+                                  label: Text(grp.name),
+                                  selected: _selectedGroup == grp.name,
+                                  onSelected: (_) {
+                                    setState(() {
+                                      _selectedGroup = grp.name;
+                                    });
+                                  },
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add, color: Colors.white),
+                      onPressed: () {
+                        _showGroupModal();
+                      },
+                    )
+                  ],
+                ),
+              ),
               const SizedBox(height: 8),
               Column(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(left: 16.0), // 왼쪽 여백 추가
-                        child: TextButton(
-                          onPressed: () {
-                            // Rootine 버튼 동작 추가
-                          },
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text("+ Rootine"),
-                        ),
-                      ),
-                      Text(
-                        "${_selectedDay.month}.${_selectedDay.day} To Do ",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Padding(
-                        padding:
-                            const EdgeInsets.only(right: 16.0), // 오른쪽 여백 추가
-                        child: TextButton(
-                          onPressed: _showEditOptions,
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text("수정"),
-                        ),
-                      ),
-                    ],
-                  ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0),
                     child: SizedBox(
@@ -551,21 +565,105 @@ class _TodoScreenState extends State<TodoScreen> {
                         children:
                             List.generate(_selectedEvents.length, (index) {
                           final item = _selectedEvents[index];
-                          return CheckboxListTile(
-                            contentPadding: const EdgeInsets.only(left: 50),
-                            value: item.completed,
-                            activeColor: Colors.green,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(
-                              item.text,
-                              style: const TextStyle(color: Colors.white),
+                          return Dismissible(
+                            key: Key(item.id ?? '${item.text}-$index'),
+                            background: Container(
+                              color: Colors.blue,
+                              alignment: Alignment.centerLeft,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              child:
+                                  const Icon(Icons.edit, color: Colors.white),
                             ),
-                            onChanged: (value) {
-                              setState(() {
-                                item.completed = value!;
-                                _updateTodoCompletion(item);
-                              });
+                            secondaryBackground: Container(
+                              color: Colors.red,
+                              alignment: Alignment.centerRight,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              child:
+                                  const Icon(Icons.delete, color: Colors.white),
+                            ),
+                            confirmDismiss: (direction) async {
+                              if (direction == DismissDirection.startToEnd) {
+                                // 편집
+                                TextEditingController editController =
+                                    TextEditingController(text: item.text);
+                                await showDialog(
+                                  context: context,
+                                  builder: (context) {
+                                    return AlertDialog(
+                                      title: const Text("할 일 수정"),
+                                      content: TextField(
+                                        controller: editController,
+                                        decoration: const InputDecoration(
+                                          hintText: "수정할 내용을 입력하세요",
+                                        ),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                          },
+                                          child: const Text("취소"),
+                                        ),
+                                        TextButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              item.text = editController.text;
+                                              if (item.id != null) {
+                                                FirebaseFirestore.instance
+                                                    .collection("todos")
+                                                    .doc(item.id)
+                                                    .update(
+                                                        {"text": item.text});
+                                              }
+                                            });
+                                            Navigator.pop(context);
+                                          },
+                                          child: const Text("수정"),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                );
+                                return false;
+                              } else if (direction ==
+                                  DismissDirection.endToStart) {
+                                // 삭제
+                                if (item.id != null) {
+                                  FirebaseFirestore.instance
+                                      .collection("todos")
+                                      .doc(item.id)
+                                      .delete();
+                                }
+                                setState(() {
+                                  _events[_selectedDay]?.remove(item);
+                                });
+                                return true;
+                              }
+                              return false;
                             },
+                            child: CheckboxListTile(
+                              contentPadding: const EdgeInsets.only(left: 50),
+                              value: item.completed,
+                              activeColor: Colors.green,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(
+                                item.text,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  decoration: item.completed
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                              onChanged: (value) {
+                                setState(() {
+                                  item.completed = value!;
+                                  _updateTodoCompletion(item);
+                                });
+                              },
+                            ),
                           );
                         }),
                       ),
