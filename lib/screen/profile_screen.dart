@@ -188,7 +188,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _deleteAccount() async {
     try {
-      // 재인증을 위한 다이얼로그 출력
+      // 재인증 다이얼로그 출력
       final TextEditingController passwordController = TextEditingController();
       final password = await showDialog<String>(
         context: context,
@@ -217,16 +217,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
         },
       );
       if (password == null || password.isEmpty) return;
-
       User? user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
-
       // 이메일/비밀번호 자격증명을 통한 재인증
       final credential =
           EmailAuthProvider.credential(email: user.email!, password: password);
       await user.reauthenticateWithCredential(credential);
 
-      // 재인증 후 계정 삭제
+      // Firestore에서 해당 사용자 관련 모든 데이터 삭제
+      final userDocRef =
+          FirebaseFirestore.instance.collection('users').doc(user.uid);
+      // 하위 컬렉션 삭제 (예: schedules, groups, friend_requests)
+      for (var subPath in ['schedules', 'groups', 'friend_requests']) {
+        final subQuery = await userDocRef.collection(subPath).get();
+        for (var doc in subQuery.docs) {
+          await doc.reference.delete();
+        }
+      }
+      // 다른 사용자 문서에서 내 이메일 제거
+      final usersSnapshot =
+          await FirebaseFirestore.instance.collection('users').get();
+      for (var doc in usersSnapshot.docs) {
+        await doc.reference.update({
+          'friends': FieldValue.arrayRemove([user.email])
+        });
+      }
+      // 사용자 문서 삭제
+      await userDocRef.delete();
+      // Firebase Auth 계정 삭제
       await user.delete();
       Navigator.pushReplacementNamed(context, '/login');
     } catch (e) {
