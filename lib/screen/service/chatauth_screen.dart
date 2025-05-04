@@ -130,22 +130,11 @@ class ChatAuthScreenState extends State<ChatAuthScreen> {
   Widget build(BuildContext context) {
     User? currentUser = FirebaseAuth.instance.currentUser;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.black, // 배경색을 검정색으로 설정
       appBar: AppBar(
-        backgroundColor: Colors.transparent, // 변경됨
+        backgroundColor: Colors.black, // AppBar 배경색도 검정색으로 설정
         flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                Color.fromARGB(255, 0, 36, 29),
-                Color.fromARGB(255, 19, 1, 30),
-                Color.fromARGB(255, 32, 1, 29),
-              ],
-              stops: [0.0, 0.5, 1.0],
-            ),
-          ),
+          color: Colors.black, // flexibleSpace도 검정색으로 통일
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white), // 모두 흰색
@@ -193,16 +182,7 @@ class ChatAuthScreenState extends State<ChatAuthScreen> {
             Expanded(
               child: Container(
                 decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [
-                      Color.fromARGB(255, 0, 36, 29),
-                      Color.fromARGB(255, 19, 1, 30),
-                      Color.fromARGB(255, 32, 1, 29),
-                    ],
-                    stops: [0.0, 0.5, 1.0],
-                  ),
+                  color: Colors.black, // 단색 검정색으로 변경
                 ),
                 // SafeArea로 감싸서 하단 여백 확보
                 child: ListView(
@@ -483,16 +463,7 @@ class ChatAuthScreenState extends State<ChatAuthScreen> {
             Container(
               height: 20,
               decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: [
-                    Color.fromARGB(255, 0, 36, 29),
-                    Color.fromARGB(255, 19, 1, 30),
-                    Color.fromARGB(255, 32, 1, 29),
-                  ],
-                  stops: [0.0, 0.5, 1.0],
-                ),
+                color: Colors.black, // 단색 검정색으로 변경
               ),
             ),
           ],
