@@ -11,7 +11,7 @@ class GroupChatCreationScreen extends StatefulWidget {
 }
 
 class _GroupChatCreationScreenState extends State<GroupChatCreationScreen> {
-  List<dynamic> friends = [];
+  List<String> friends = [];
   List<String> selectedFriends = [];
   final TextEditingController _roomNameController = TextEditingController();
 
@@ -23,7 +23,7 @@ class _GroupChatCreationScreenState extends State<GroupChatCreationScreen> {
         .doc(currentUser.uid)
         .get();
     setState(() {
-      friends = userDoc.data()?["friends"] ?? [];
+      friends = List<String>.from(userDoc.data()?["friends"] ?? []);
     });
   }
 
@@ -89,23 +89,43 @@ class _GroupChatCreationScreenState extends State<GroupChatCreationScreen> {
                 itemBuilder: (context, index) {
                   String friendEmail = friends[index];
                   bool isSelected = selectedFriends.contains(friendEmail);
-                  return ListTile(
-                    title: Text(friendEmail,
-                        style: const TextStyle(color: Colors.white)),
-                    trailing: Checkbox(
-                      value: isSelected,
-                      onChanged: (val) {
-                        setState(() {
-                          if (val == true) {
-                            selectedFriends.add(friendEmail);
-                          } else {
-                            selectedFriends.remove(friendEmail);
-                          }
-                        });
-                      },
-                      activeColor: Colors.pink,
-                      checkColor: Colors.white,
-                    ),
+                  return FutureBuilder<QuerySnapshot>(
+                    future: FirebaseFirestore.instance
+                        .collection("users")
+                        .where("email", isEqualTo: friendEmail)
+                        .limit(1)
+                        .get(),
+                    builder: (context, snapshot) {
+                      return ListTile(
+                        title: Builder(
+                          builder: (context) {
+                            String friendName = friendEmail;
+                            if (snapshot.hasData &&
+                                snapshot.data!.docs.isNotEmpty) {
+                              friendName = (snapshot.data!.docs.first.data()
+                                      as Map<String, dynamic>)["name"] ??
+                                  friendEmail;
+                            }
+                            return Text(friendName,
+                                style: const TextStyle(color: Colors.white));
+                          },
+                        ),
+                        trailing: Checkbox(
+                          value: isSelected,
+                          onChanged: (val) {
+                            setState(() {
+                              if (val == true) {
+                                selectedFriends.add(friendEmail);
+                              } else {
+                                selectedFriends.remove(friendEmail);
+                              }
+                            });
+                          },
+                          activeColor: Colors.pink,
+                          checkColor: Colors.white,
+                        ),
+                      );
+                    },
                   );
                 },
               ),
