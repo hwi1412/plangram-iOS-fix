@@ -21,16 +21,17 @@ class _SearchScreenState extends State<SearchScreen>
     String query = _searchController.text.trim().toLowerCase();
     if (query.isEmpty) return;
     try {
-      var res = await FirebaseFirestore.instance
-          .collection("users")
-          .where("emailKeywords", arrayContains: query)
-          .get();
+      // 전체 users 컬렉션 불러온 후, 이메일 또는 이름에 query가 포함된 문서를 필터링
+      var snapshot = await FirebaseFirestore.instance.collection("users").get();
       final currentUserEmail =
           FirebaseAuth.instance.currentUser?.email?.toLowerCase();
-      final filteredDocs = res.docs.where((doc) {
+      final filteredDocs = snapshot.docs.where((doc) {
         final data = doc.data();
-        // 필터: 내 이메일과 일치하는 문서를 제외
-        return data['email'].toString().toLowerCase() != currentUserEmail;
+        final email = data['email'].toString().toLowerCase();
+        final name = (data['name']?.toString().toLowerCase() ?? "");
+        // 내 계정 건너뛰기 및 이메일 또는 이름에 query 포함 여부 확인
+        return email != currentUserEmail &&
+            (email.contains(query) || name.contains(query));
       }).toList();
       print("검색 쿼리 실행 결과: ${filteredDocs.length}건");
       setState(() {
