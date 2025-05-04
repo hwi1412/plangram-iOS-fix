@@ -18,16 +18,23 @@ class _SearchScreenState extends State<SearchScreen>
   late Animation<double> _animation;
 
   Future<void> _search() async {
-    String query = _searchController.text.trim().toLowerCase(); // 소문자로 변환
+    String query = _searchController.text.trim().toLowerCase();
     if (query.isEmpty) return;
     try {
       var res = await FirebaseFirestore.instance
           .collection("users")
-          .where("emailKeywords", arrayContains: query) // 수정된 부분
+          .where("emailKeywords", arrayContains: query)
           .get();
-      print("검색 쿼리 실행 결과: ${res.docs.length}건");
+      final currentUserEmail =
+          FirebaseAuth.instance.currentUser?.email?.toLowerCase();
+      final filteredDocs = res.docs.where((doc) {
+        final data = doc.data();
+        // 필터: 내 이메일과 일치하는 문서를 제외
+        return data['email'].toString().toLowerCase() != currentUserEmail;
+      }).toList();
+      print("검색 쿼리 실행 결과: ${filteredDocs.length}건");
       setState(() {
-        _results = res.docs;
+        _results = filteredDocs;
       });
     } catch (e) {
       print("검색 중 오류 발생: $e");
