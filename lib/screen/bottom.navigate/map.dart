@@ -256,9 +256,8 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.transparent, // 변경: 투명 처리
         elevation: 0,
         centerTitle: true,
         title: const Text('친구의 캘린더', style: TextStyle(color: Colors.white)),
@@ -274,18 +273,12 @@ class _MapScreenState extends State<MapScreen> {
             onPressed: _showGroupCreationSheet,
           )
         ],
-        // 세로 그라디언트 적용 (top → bottom)
         flexibleSpace: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                Color.fromARGB(255, 8, 17, 20),
-                Color.fromARGB(255, 35, 11, 32),
-                Color.fromARGB(255, 6, 44, 40),
-                Color.fromARGB(255, 12, 20, 19),
-              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF121212), Color(0xFF1E1E1E)], // 변경된 색상: 배경과 동일
             ),
           ),
         ),
@@ -293,14 +286,9 @@ class _MapScreenState extends State<MapScreen> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              Color.fromARGB(255, 8, 17, 20),
-              Color.fromARGB(255, 35, 11, 32),
-              Color.fromARGB(255, 6, 44, 40),
-              Color.fromARGB(255, 12, 20, 19),
-            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF121212), Color(0xFF1E1E1E)],
           ),
         ),
         child: ListView(
