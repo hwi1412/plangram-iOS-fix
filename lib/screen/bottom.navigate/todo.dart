@@ -76,15 +76,15 @@ class _TodoScreenState extends State<TodoScreen> {
       date = DateTime(date.year, date.month, date.day);
       String? docGroup = data["group"]; // "MY", 특정 그룹, 혹은 null
       String? creator = data["creator"];
+      List<String> groupMembers = List<String>.from(data["groupMembers"] ?? []);
+
       // 접근 권한 체크:
       if (docGroup == "MY") {
         // 개인 todo: 본인이 작성한 경우만 표시
         if (creator != currentEmail) continue;
       } else if (docGroup != null) {
-        // 그룹 todo: 해당 그룹의 구성원이면 표시 (작성자와 상관없이)
-        var group = _groups.firstWhere((g) => g.name == docGroup,
-            orElse: () => Group(name: docGroup, members: []));
-        if (!group.members.contains(currentEmail)) continue;
+        // 그룹 todo: 해당 그룹의 멤버(이메일)만 표시
+        if (!groupMembers.contains(currentEmail)) continue;
       } else {
         // 그룹 필드가 null이면 개인 todo로 간주
         if (creator != currentEmail) continue;
@@ -122,7 +122,7 @@ class _TodoScreenState extends State<TodoScreen> {
       String roomName = data["roomName"] ?? "";
       if (roomName.isNotEmpty && !groupNames.contains(roomName)) {
         groupNames.add(roomName);
-        // "members" 필드를 읽어 그룹 멤버 리스트로 저장
+        // "members" 필드를 이메일 리스트로 저장
         List<String> members = List<String>.from(data["members"] ?? []);
         loadedGroups.add(Group(name: roomName, members: members));
       }
@@ -138,7 +138,25 @@ class _TodoScreenState extends State<TodoScreen> {
       String groupName = data["groupName"] ?? "";
       if (groupName.isNotEmpty && !groupNames.contains(groupName)) {
         groupNames.add(groupName);
-        List<String> members = List<String>.from(data["members"] ?? []);
+        // 이메일로 변환
+        List<dynamic> membersRaw = data["members"] ?? [];
+        List<String> members = [];
+        for (var member in membersRaw) {
+          if (member is String && member.contains('@')) {
+            members.add(member); // 이미 이메일
+          } else if (member is String) {
+            // 이름일 경우 이메일로 변환
+            QuerySnapshot userQuery = await FirebaseFirestore.instance
+                .collection("users")
+                .where("name", isEqualTo: member)
+                .limit(1)
+                .get();
+            if (userQuery.docs.isNotEmpty) {
+              members.add((userQuery.docs.first.data()
+                  as Map<String, dynamic>)["email"]);
+            }
+          }
+        }
         loadedGroups.add(Group(name: groupName, members: members));
       }
     }
@@ -174,6 +192,38 @@ class _TodoScreenState extends State<TodoScreen> {
     return friendNames;
   }
 
+  // 친구 목록을 [{name, email}] 형태로 반환
+  Future<List<Map<String, String>>> _getFriendListWithEmail() async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return [];
+    var userDoc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(currentUser.uid)
+        .get();
+    List<String> friendEmails =
+        List<String>.from(userDoc.data()?["friends"] ?? []);
+    List<Map<String, String>> friendList = [];
+    for (var email in friendEmails) {
+      QuerySnapshot query = await FirebaseFirestore.instance
+          .collection("users")
+          .where("email", isEqualTo: email)
+          .limit(1)
+          .get();
+      if (query.docs.isNotEmpty) {
+        final data = query.docs.first.data() as Map<String, dynamic>;
+        friendList.add({"name": data["name"] ?? email, "email": email});
+      } else {
+        friendList.add({"name": email, "email": email});
+      }
+    }
+    // 본인도 추가
+    friendList.add({
+      "name": currentUser.displayName ?? currentUser.email!,
+      "email": currentUser.email!
+    });
+    return friendList;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -185,25 +235,42 @@ class _TodoScreenState extends State<TodoScreen> {
     final dateString = _formatDate(_selectedDay);
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
-    // "creator" 필드 추가
+
+    String? groupField;
+    List<String>? groupMembers;
+
+    if (_selectedGroup == "전체 보기") {
+      groupField = null;
+      groupMembers = null;
+    } else if (_selectedGroup == "My") {
+      groupField = "MY";
+      groupMembers = [currentUser.email!];
+    } else {
+      groupField = _selectedGroup;
+      // 그룹 멤버 찾기 (항상 이메일 리스트)
+      final groupObj = _groups.firstWhere((g) => g.name == _selectedGroup,
+          orElse: () => Group(name: _selectedGroup, members: []));
+      groupMembers = groupObj.members;
+      // 본인이 포함되어 있지 않으면 추가
+      if (!groupMembers.contains(currentUser.email!)) {
+        groupMembers.add(currentUser.email!);
+      }
+    }
+
     await FirebaseFirestore.instance.collection("todos").add({
       "date": dateString,
       "text": todo,
       "completed": false,
-      "group": _selectedGroup == "전체 보기"
-          ? null
-          : (_selectedGroup == "My" ? "MY" : _selectedGroup),
+      "group": groupField,
+      "groupMembers": groupMembers, // 이메일 리스트로 저장
       "creator": currentUser.email,
     }).then((docRef) {
       setState(() {
         if (_events[_selectedDay] == null) {
           _events[_selectedDay] = [];
         }
-        _events[_selectedDay]!.add(TodoItem(todo,
-            id: docRef.id,
-            group: _selectedGroup == "전체 보기"
-                ? null
-                : (_selectedGroup == "My" ? "MY" : _selectedGroup)));
+        _events[_selectedDay]!
+            .add(TodoItem(todo, id: docRef.id, group: groupField));
       });
     });
   }
@@ -246,9 +313,9 @@ class _TodoScreenState extends State<TodoScreen> {
                     style: const TextStyle(color: Colors.white),
                   ),
                   const SizedBox(height: 10),
-                  // 친구(멤버) 선택 체크박스 목록 (현재 친구 목록 불러오기)
-                  FutureBuilder<List<String>>(
-                    future: _getFriendList(),
+                  // 친구(멤버) 선택 체크박스 목록 (이메일로 저장)
+                  FutureBuilder<List<Map<String, String>>>(
+                    future: _getFriendListWithEmail(),
                     builder: (context, snapshot) {
                       if (!snapshot.hasData) {
                         return const Center(child: CircularProgressIndicator());
@@ -256,17 +323,19 @@ class _TodoScreenState extends State<TodoScreen> {
                       final friendList = snapshot.data!;
                       return Column(
                         children: friendList.map((friend) {
+                          final email = friend['email']!;
+                          final name = friend['name']!;
                           return CheckboxListTile(
-                            title: Text(friend,
+                            title: Text(name,
                                 style: const TextStyle(color: Colors.white)),
-                            value: selectedMembers.contains(friend),
+                            value: selectedMembers.contains(email),
                             activeColor: Colors.green,
                             onChanged: (val) {
                               modalSetState(() {
                                 if (val == true) {
-                                  selectedMembers.add(friend);
+                                  selectedMembers.add(email);
                                 } else {
-                                  selectedMembers.remove(friend);
+                                  selectedMembers.remove(email);
                                 }
                               });
                             },
