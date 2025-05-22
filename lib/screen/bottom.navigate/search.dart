@@ -16,12 +16,12 @@ class _SearchScreenState extends State<SearchScreen>
   List<dynamic> friends = [];
   late AnimationController _animationController;
   late Animation<double> _animation;
+  List<String> blockedUserUids = [];
 
   Future<void> _search() async {
     String query = _searchController.text.trim().toLowerCase();
     if (query.isEmpty) return;
     try {
-      // 전체 users 컬렉션 불러온 후, 이메일 또는 이름에 query가 포함된 문서를 필터링
       var snapshot = await FirebaseFirestore.instance.collection("users").get();
       final currentUserEmail =
           FirebaseAuth.instance.currentUser?.email?.toLowerCase();
@@ -29,9 +29,10 @@ class _SearchScreenState extends State<SearchScreen>
         final data = doc.data();
         final email = data['email'].toString().toLowerCase();
         final name = (data['name']?.toString().toLowerCase() ?? "");
-        // 내 계정 건너뛰기 및 이메일 또는 이름에 query 포함 여부 확인
-        return email != currentUserEmail &&
-            (email.contains(query) || name.contains(query));
+        // 내 계정, 차단된 사용자 제외
+        if (email == currentUserEmail) return false;
+        if (blockedUserUids.contains(doc.id)) return false;
+        return email.contains(query) || name.contains(query);
       }).toList();
       print("검색 쿼리 실행 결과: ${filteredDocs.length}건");
       setState(() {
@@ -46,7 +47,6 @@ class _SearchScreenState extends State<SearchScreen>
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    // target user 문서 조회 (email이 일치하는 문서)
     var res = await FirebaseFirestore.instance
         .collection("users")
         .where("email", isEqualTo: friendEmail)
@@ -56,18 +56,15 @@ class _SearchScreenState extends State<SearchScreen>
           .showSnackBar(const SnackBar(content: Text('사용자를 찾지 못했습니다.')));
       return;
     }
-    // target user uid 추출
     final friendDoc = res.docs.first;
     final friendUid = friendDoc.id;
 
-    // 현재 사용자 정보 조회 (이름 필요)
     var currentUserDoc = await FirebaseFirestore.instance
         .collection("users")
         .doc(currentUser.uid)
         .get();
     final senderName = currentUserDoc.data()?["name"] ?? '';
 
-    // friend_requests 하위 컬렉션에 요청 저장 (요청자는 currentUser.uid)
     await FirebaseFirestore.instance
         .collection("users")
         .doc(friendUid)
@@ -94,6 +91,230 @@ class _SearchScreenState extends State<SearchScreen>
     });
   }
 
+  Future<void> _loadBlockedUsers() async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    final snapshot = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(currentUser.uid)
+        .collection("blockedUsers")
+        .get();
+    setState(() {
+      blockedUserUids = snapshot.docs.map((doc) => doc.id).toList();
+    });
+  }
+
+  Future<void> _blockUser(String targetUid) async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    // 1. targetUid의 이메일 조회
+    final targetDoc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(targetUid)
+        .get();
+    final targetEmail = targetDoc.data()?["email"];
+    final myEmail = currentUser.email;
+
+    // 2. 내 friends에서 targetEmail 제거
+    if (targetEmail != null) {
+      await FirebaseFirestore.instance
+          .collection("users")
+          .doc(currentUser.uid)
+          .update({
+        'friends': FieldValue.arrayRemove([targetEmail])
+      });
+    }
+
+    // 3. 상대방 friends에서 내 이메일 제거
+    if (myEmail != null) {
+      await FirebaseFirestore.instance
+          .collection("users")
+          .doc(targetUid)
+          .update({
+        'friends': FieldValue.arrayRemove([myEmail])
+      });
+    }
+
+    // 4. 차단 처리
+    await FirebaseFirestore.instance
+        .collection("users")
+        .doc(currentUser.uid)
+        .collection("blockedUsers")
+        .doc(targetUid)
+        .set({"blockedAt": FieldValue.serverTimestamp()});
+
+    // 5. UI 갱신
+    await _loadBlockedUsers();
+    await _loadFriends();
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('사용자가 차단(및 친구 해제)되었습니다.')));
+  }
+
+  Future<void> _unblockUser(String targetUid) async {
+    User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+    await FirebaseFirestore.instance
+        .collection("users")
+        .doc(currentUser.uid)
+        .collection("blockedUsers")
+        .doc(targetUid)
+        .delete();
+    await _loadBlockedUsers();
+  }
+
+  Future<void> _showReportDialog(String targetUid, String targetEmail) async {
+    String? selectedReason;
+    TextEditingController customReasonController = TextEditingController();
+    final reasons = ["스팸/광고", "욕설/비방", "부적절한 프로필", "기타"];
+    String? errorText;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              title: const Text('사용자 신고'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...reasons.map((reason) => RadioListTile<String>(
+                        title: Text(reason),
+                        value: reason,
+                        groupValue: selectedReason,
+                        onChanged: (val) {
+                          setModalState(() {
+                            selectedReason = val;
+                            errorText = null;
+                          });
+                        },
+                      )),
+                  if (selectedReason == "기타")
+                    TextField(
+                      controller: customReasonController,
+                      decoration: const InputDecoration(
+                        labelText: "신고 사유 입력",
+                      ),
+                      maxLength: 100,
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "신고 사유를 선택하거나 직접 입력해 주세요. 허위 신고 시 서비스 이용에 제한이 있을 수 있습니다.",
+                    style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic),
+                  ),
+                  if (errorText != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6.0),
+                      child: Text(
+                        errorText!,
+                        style: const TextStyle(color: Colors.red, fontSize: 13),
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('취소'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    String reason = selectedReason == "기타"
+                        ? customReasonController.text.trim()
+                        : (selectedReason ?? "");
+                    if (selectedReason == null) {
+                      setModalState(() {
+                        errorText = "신고 사유를 선택해 주세요.";
+                      });
+                      return;
+                    }
+                    if (selectedReason == "기타" && reason.isEmpty) {
+                      setModalState(() {
+                        errorText = "기타 사유를 입력해 주세요.";
+                      });
+                      return;
+                    }
+                    User? currentUser = FirebaseAuth.instance.currentUser;
+                    if (currentUser == null) return;
+
+                    // 1. 친구 관계 해제(양방향)
+                    final myEmail = currentUser.email;
+                    if (targetEmail.isNotEmpty) {
+                      await FirebaseFirestore.instance
+                          .collection("users")
+                          .doc(currentUser.uid)
+                          .update({
+                        'friends': FieldValue.arrayRemove([targetEmail])
+                      });
+                    }
+                    if (myEmail != null) {
+                      await FirebaseFirestore.instance
+                          .collection("users")
+                          .doc(targetUid)
+                          .update({
+                        'friends': FieldValue.arrayRemove([myEmail])
+                      });
+                    }
+
+                    // 2. 차단 처리
+                    await FirebaseFirestore.instance
+                        .collection("users")
+                        .doc(currentUser.uid)
+                        .collection("blockedUsers")
+                        .doc(targetUid)
+                        .set({"blockedAt": FieldValue.serverTimestamp()});
+
+                    // 3. 신고 저장
+                    await FirebaseFirestore.instance.collection("reports").add({
+                      "targetUid": targetUid,
+                      "targetEmail": targetEmail,
+                      "reporterUid": currentUser.uid,
+                      "reporterEmail": myEmail,
+                      "reason": reason,
+                      "timestamp": FieldValue.serverTimestamp(),
+                    });
+
+                    // 4. UI 갱신
+                    await _loadBlockedUsers();
+                    await _loadFriends();
+
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          '신고가 정상적으로 접수되었습니다. 운영팀에서 검토 후 필요한 조치를 취할 예정입니다.',
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('신고'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showBlockedUsersScreen() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BlockedUsersScreen(
+          blockedUserUids: blockedUserUids,
+          onUnblock: _unblockUser,
+        ),
+      ),
+    );
+    await _loadBlockedUsers();
+  }
+
   Future<Map<String, String>> _getFriendInfo(String friendEmail) async {
     var query = await FirebaseFirestore.instance
         .collection("users")
@@ -110,6 +331,7 @@ class _SearchScreenState extends State<SearchScreen>
   void initState() {
     super.initState();
     _loadFriends();
+    _loadBlockedUsers();
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -131,7 +353,6 @@ class _SearchScreenState extends State<SearchScreen>
     return AnimatedBuilder(
       animation: _animation,
       builder: (context, child) {
-        // 남색 계열의 두 가지 색상 그라디언트
         final Color color1 = Color.lerp(const Color(0xFF0A2342),
             const Color(0xFF1B2845), _animation.value)!;
         final Color color2 = Color.lerp(const Color(0xFF274472),
@@ -157,6 +378,13 @@ class _SearchScreenState extends State<SearchScreen>
               ),
             ),
             titleTextStyle: const TextStyle(color: Colors.white),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.block, color: Colors.white),
+                tooltip: '차단 관리',
+                onPressed: _showBlockedUsersScreen,
+              ),
+            ],
           ),
           body: AnimatedContainer(
             duration: const Duration(milliseconds: 800),
@@ -201,13 +429,12 @@ class _SearchScreenState extends State<SearchScreen>
                       return ListTile(
                         title: Text(
                           userData['email'],
-                          style: TextStyle(
-                              color: Colors.grey[300]), // 이메일 텍스트를 밝은 회색으로
+                          style: TextStyle(color: Colors.grey[300]),
                         ),
                         subtitle: Text(userData['name'] ?? ''),
                         trailing: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.black, // 버튼 텍스트를 검정색으로
+                            foregroundColor: Colors.black,
                           ),
                           onPressed: () =>
                               _sendFriendRequest(userData['email']),
@@ -217,7 +444,6 @@ class _SearchScreenState extends State<SearchScreen>
                     },
                   ),
                 ),
-                // 얇은 회색 선 추가
                 const Padding(
                   padding: EdgeInsets.only(top: 16.0, bottom: 0),
                   child: Divider(
@@ -273,6 +499,67 @@ class _SearchScreenState extends State<SearchScreen>
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       IconButton(
+                                        icon: const Icon(Icons.more_vert,
+                                            color: Colors.white),
+                                        tooltip: '더보기',
+                                        onPressed: () async {
+                                          var q = await FirebaseFirestore
+                                              .instance
+                                              .collection("users")
+                                              .where("email",
+                                                  isEqualTo: friendEmail)
+                                              .limit(1)
+                                              .get();
+                                          if (q.docs.isEmpty) return;
+                                          final targetUid = q.docs.first.id;
+                                          showModalBottomSheet(
+                                            context: context,
+                                            builder: (context) {
+                                              return SafeArea(
+                                                child: Column(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                          Icons.block,
+                                                          color: Colors.red),
+                                                      title: const Text(
+                                                        '차단',
+                                                        style: TextStyle(
+                                                            color: Colors.red),
+                                                      ),
+                                                      onTap: () async {
+                                                        Navigator.pop(context);
+                                                        await _blockUser(
+                                                            targetUid);
+                                                      },
+                                                    ),
+                                                    ListTile(
+                                                      leading: const Icon(
+                                                          Icons.report,
+                                                          color: Colors.orange),
+                                                      title: const Text(
+                                                        '신고',
+                                                        style: TextStyle(
+                                                            color:
+                                                                Colors.orange),
+                                                      ),
+                                                      onTap: () {
+                                                        Navigator.pop(context);
+                                                        _showReportDialog(
+                                                            targetUid,
+                                                            friendEmail);
+                                                      },
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            },
+                                          );
+                                        },
+                                      ),
+                                      IconButton(
                                         icon: const Icon(Icons.person_remove,
                                             color: Colors.red),
                                         tooltip: '친구 끊기',
@@ -280,7 +567,6 @@ class _SearchScreenState extends State<SearchScreen>
                                           User? currentUser =
                                               FirebaseAuth.instance.currentUser;
                                           if (currentUser == null) return;
-                                          // 내 friends에서 삭제
                                           await FirebaseFirestore.instance
                                               .collection("users")
                                               .doc(currentUser.uid)
@@ -288,7 +574,6 @@ class _SearchScreenState extends State<SearchScreen>
                                             'friends': FieldValue.arrayRemove(
                                                 [friendEmail])
                                           });
-                                          // 상대방 friends에서도 나를 삭제 (옵션)
                                           await FirebaseFirestore.instance
                                               .collection("users")
                                               .where("email",
@@ -343,6 +628,83 @@ class _SearchScreenState extends State<SearchScreen>
           ),
         );
       },
+    );
+  }
+}
+
+class BlockedUsersScreen extends StatefulWidget {
+  final List<String> blockedUserUids;
+  final Future<void> Function(String) onUnblock;
+  const BlockedUsersScreen(
+      {super.key, required this.blockedUserUids, required this.onUnblock});
+
+  @override
+  State<BlockedUsersScreen> createState() => _BlockedUsersScreenState();
+}
+
+class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
+  List<Map<String, String>> blockedUsers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBlockedUserInfos();
+  }
+
+  Future<void> _loadBlockedUserInfos() async {
+    List<Map<String, String>> infos = [];
+    for (final uid in widget.blockedUserUids) {
+      final doc =
+          await FirebaseFirestore.instance.collection("users").doc(uid).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        infos.add({
+          "uid": uid,
+          "name": data["name"] ?? "",
+          "email": data["email"] ?? "",
+        });
+      }
+    }
+    setState(() {
+      blockedUsers = infos;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('차단된 사용자 관리', style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      backgroundColor: Colors.black,
+      body: blockedUsers.isEmpty
+          ? const Center(
+              child: Text('차단된 사용자가 없습니다.',
+                  style: TextStyle(color: Colors.white70)))
+          : ListView.builder(
+              itemCount: blockedUsers.length,
+              itemBuilder: (context, index) {
+                final user = blockedUsers[index];
+                return ListTile(
+                  title: Text(user["name"] ?? "",
+                      style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(user["email"] ?? "",
+                      style: const TextStyle(color: Colors.grey)),
+                  trailing: TextButton(
+                    onPressed: () async {
+                      await widget.onUnblock(user["uid"]!);
+                      setState(() {
+                        blockedUsers.removeAt(index);
+                      });
+                    },
+                    child: const Text('차단 해제',
+                        style: TextStyle(color: Colors.pink)),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
