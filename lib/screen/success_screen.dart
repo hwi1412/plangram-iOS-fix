@@ -115,198 +115,341 @@ class _SuccessScreenState extends State<SuccessScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 관리자 계정이면 강제 AdminDashboard로 이동
     final user = FirebaseAuth.instance.currentUser;
     final email = user?.email?.toLowerCase();
+
+    // 관리자 계정이면 강제 AdminDashboard로 이동
     if (email == 'admin@plangram.com') {
-      // 바로 대시보드로 이동 (pushReplacement로 루프 방지)
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.of(context).pushReplacementNamed('/admin');
       });
-      return const SizedBox(); // 화면 깜빡임 방지용
+      return const SizedBox();
     }
 
-    final bool isDetailBoxVisible =
-        _calendarKey.currentState?.selectedDetailDay != null;
+    // 계정 상태 확인 및 제한
+    return FutureBuilder<DocumentSnapshot>(
+      future: user != null
+          ? FirebaseFirestore.instance.collection('users').doc(user.uid).get()
+          : null,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+        final status = data['accountStatus'] ?? 'active';
+        final suspendedUntil = data['suspendedUntil'];
+        final suspendReason = data['suspendReason'] ?? '';
+        final now = DateTime.now();
 
-    return Scaffold(
-      appBar: const CustomAppBar(),
-      bottomNavigationBar: const CustomNavigationBar(),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: [
-                    const Color.fromARGB(255, 0, 57, 47),
-                    const Color.fromARGB(255, 85, 27, 79),
-                  ],
-                ),
-              ),
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 16),
-                children: [
-                  const SizedBox(height: 44), // 위쪽 공간 더 넓게 (기존 30 → 44)
-                  _ProfileCircleList(
-                    onShowTodayStatusSelector: _handleShowTodayStatusSelector,
-                    showTodayStatusSelector: _showTodayStatusSelector,
-                    todayStatus: _todayStatus,
-                    onSetTodayStatus: _handleSetTodayStatus,
-                  ),
-                  const SizedBox(height: 0), // 아래 공간 더 좁게 (기존 5 → 0)
-                  PlangramHomePageContent(
-                    key: _calendarKey,
-                    isEditing: _isEditing,
-                  ),
-                  Padding(
-                    padding: EdgeInsets.only(
-                      top: 0,
-                      left: 12,
-                      bottom: 8 + (isDetailBoxVisible ? 5.0 : 0.0),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        GestureDetector(
-                          onTap: _toggleInfoBubble,
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            margin: const EdgeInsets.only(right: 10),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.white.withOpacity(0.3), // 흰색 반투명 배경
-                            ),
-                            child: Icon(
-                              Icons.info_outline,
-                              color: Colors.white.withOpacity(0.7),
-                              size: 18,
-                            ),
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: _toggleEdit,
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.white.withOpacity(0.3), // 흰색 반투명 배경
-                            ),
-                            child: Icon(
-                              _isEditing ? Icons.save : Icons.edit,
-                              color: Colors.white.withOpacity(0.7),
-                              size: 18,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+        if (status == 'banned') {
+          // 영구정지
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await FirebaseAuth.instance.signOut();
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => AlertDialog(
+                title: const Text('접근 제한'),
+                content: const Text('이 계정은 영구정지되었습니다.'),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).pushReplacementNamed('/login');
+                    },
+                    child: const Text('확인'),
                   ),
                 ],
               ),
-            ),
-            if (_showInfo)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: _hideInfoBubble,
-                  child: Container(
-                    color: Colors.transparent,
-                    child: Center(
-                      child: GestureDetector(
-                        onTap: () {},
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 120),
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 18, horizontal: 22),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF102040).withOpacity(0.95),
-                            borderRadius: BorderRadius.circular(18),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
+            );
+          });
+          return const SizedBox();
+        } else if (status == 'suspended' && suspendedUntil != null) {
+          DateTime until;
+          if (suspendedUntil is Timestamp) {
+            until = suspendedUntil.toDate();
+          } else if (suspendedUntil is DateTime) {
+            until = suspendedUntil;
+          } else {
+            until = now;
+          }
+          if (until.isAfter(now)) {
+            final TextEditingController appealController =
+                TextEditingController();
+            bool sending = false;
+            return Scaffold(
+              body: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.block, color: Colors.red, size: 60),
+                      const SizedBox(height: 16),
+                      Text(
+                        '이 계정은 ${until.toLocal()}까지 정지 상태입니다.',
+                        style: const TextStyle(fontSize: 18, color: Colors.red),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (suspendReason.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Text(
+                            '정지 사유: $suspendReason',
+                            style: const TextStyle(
+                                fontSize: 16, color: Colors.black87),
+                            textAlign: TextAlign.center,
                           ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _LegendRow(color: Colors.red, text: '내 휴무일'),
-                              const SizedBox(height: 8),
-                              _LegendRow(
-                                  color: Color(0xFF1DE9B6), text: '공동 휴무일'),
-                              const SizedBox(height: 8),
-                              _LegendRow(color: Colors.grey, text: '친구 휴무일'),
-                              const SizedBox(height: 8),
-                              _LegendRow(color: Colors.purple, text: '오늘'),
-                            ],
+                        ),
+                      const SizedBox(height: 24),
+                      TextField(
+                        controller: appealController,
+                        maxLines: 3,
+                        decoration: const InputDecoration(
+                          labelText: '해명/이의제기 메시지',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: sending
+                            ? null
+                            : () async {
+                                if (appealController.text.trim().isEmpty)
+                                  return;
+                                sending = true;
+                                // uid/email은 user가 null이 아님이 이미 보장됨
+                                await FirebaseFirestore.instance
+                                    .collection('appeals')
+                                    .add({
+                                  'uid': user?.uid ?? '',
+                                  'email': user?.email ?? '',
+                                  'message': appealController.text.trim(),
+                                  'timestamp': FieldValue.serverTimestamp(),
+                                  'status': '대기',
+                                });
+                                sending = false;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('해명 요청이 전송되었습니다.')),
+                                );
+                              },
+                        child: const Text('해명/이의제기 전송'),
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () async {
+                          await FirebaseAuth.instance.signOut();
+                          Navigator.of(context).pushReplacementNamed('/login');
+                        },
+                        child: const Text('로그아웃'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }
+        } else if (status == 'warned') {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('경고: 운영정책 위반 이력이 있습니다.'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          });
+        }
+
+        final bool isDetailBoxVisible =
+            _calendarKey.currentState?.selectedDetailDay != null;
+
+        return Scaffold(
+          appBar: const CustomAppBar(),
+          bottomNavigationBar: const CustomNavigationBar(),
+          body: SafeArea(
+            child: Stack(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        const Color.fromARGB(255, 0, 57, 47),
+                        const Color.fromARGB(255, 85, 27, 79),
+                      ],
+                    ),
+                  ),
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.only(bottom: 16),
+                    children: [
+                      const SizedBox(height: 44), // 위쪽 공간 더 넓게 (기존 30 → 44)
+                      _ProfileCircleList(
+                        onShowTodayStatusSelector:
+                            _handleShowTodayStatusSelector,
+                        showTodayStatusSelector: _showTodayStatusSelector,
+                        todayStatus: _todayStatus,
+                        onSetTodayStatus: _handleSetTodayStatus,
+                      ),
+                      const SizedBox(height: 0), // 아래 공간 더 좁게 (기존 5 → 0)
+                      PlangramHomePageContent(
+                        key: _calendarKey,
+                        isEditing: _isEditing,
+                      ),
+                      Padding(
+                        padding: EdgeInsets.only(
+                          top: 0,
+                          left: 12,
+                          bottom: 8 + (isDetailBoxVisible ? 5.0 : 0.0),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          children: [
+                            GestureDetector(
+                              onTap: _toggleInfoBubble,
+                              child: Container(
+                                width: 32,
+                                height: 32,
+                                margin: const EdgeInsets.only(right: 10),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white
+                                      .withOpacity(0.3), // 흰색 반투명 배경
+                                ),
+                                child: Icon(
+                                  Icons.info_outline,
+                                  color: Colors.white.withOpacity(0.7),
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: _toggleEdit,
+                              child: Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.white
+                                      .withOpacity(0.3), // 흰색 반투명 배경
+                                ),
+                                child: Icon(
+                                  _isEditing ? Icons.save : Icons.edit,
+                                  color: Colors.white.withOpacity(0.7),
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_showInfo)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      onTap: _hideInfoBubble,
+                      child: Container(
+                        color: Colors.transparent,
+                        child: Center(
+                          child: GestureDetector(
+                            onTap: () {},
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 120),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 18, horizontal: 22),
+                              decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFF102040).withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.08),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _LegendRow(color: Colors.red, text: '내 휴무일'),
+                                  const SizedBox(height: 8),
+                                  _LegendRow(
+                                      color: Color(0xFF1DE9B6), text: '공동 휴무일'),
+                                  const SizedBox(height: 8),
+                                  _LegendRow(
+                                      color: Colors.grey, text: '친구 휴무일'),
+                                  const SizedBox(height: 8),
+                                  _LegendRow(color: Colors.purple, text: '오늘'),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            if (_showTodayStatusSelector)
-              Positioned(
-                left: 52, // 프로필 위치에 맞게 조정
-                top: 50, // 기존 30 → 50 (프로필 원 아래쪽에 위치)
-                child: Material(
-                  color: Colors.transparent,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 12, horizontal: 18),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.12),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
+                if (_showTodayStatusSelector)
+                  Positioned(
+                    left: 52, // 프로필 위치에 맞게 조정
+                    top: 50, // 기존 30 → 50 (프로필 원 아래쪽에 위치)
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 18),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.12),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _TodayStatusOption(
-                          icon: Icons.check_circle,
-                          color: Colors.green,
-                          text: "만나요",
-                          selected: _todayStatus == 0,
-                          onTap: () => _handleSetTodayStatus(0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _TodayStatusOption(
+                              icon: Icons.check_circle,
+                              color: Colors.green,
+                              text: "만나요",
+                              selected: _todayStatus == 0,
+                              onTap: () => _handleSetTodayStatus(0),
+                            ),
+                            const SizedBox(height: 12),
+                            _TodayStatusOption(
+                              icon: Icons.block,
+                              color: Colors.orange,
+                              text: "바빠요",
+                              selected: _todayStatus == 1,
+                              onTap: () => _handleSetTodayStatus(1),
+                            ),
+                            const SizedBox(height: 12),
+                            _TodayStatusOption(
+                              icon: Icons.self_improvement,
+                              color: Colors.blueGrey,
+                              text: "휴식 중",
+                              selected: _todayStatus == 2,
+                              onTap: () => _handleSetTodayStatus(2),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
-                        _TodayStatusOption(
-                          icon: Icons.block,
-                          color: Colors.orange,
-                          text: "바빠요",
-                          selected: _todayStatus == 1,
-                          onTap: () => _handleSetTodayStatus(1),
-                        ),
-                        const SizedBox(height: 12),
-                        _TodayStatusOption(
-                          icon: Icons.self_improvement,
-                          color: Colors.blueGrey,
-                          text: "휴식 중",
-                          selected: _todayStatus == 2,
-                          onTap: () => _handleSetTodayStatus(2),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-          ],
-        ),
-      ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
