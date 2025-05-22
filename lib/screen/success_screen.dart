@@ -115,6 +115,17 @@ class _SuccessScreenState extends State<SuccessScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 관리자 계정이면 강제 AdminDashboard로 이동
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email?.toLowerCase();
+    if (email == 'admin@plangram.com') {
+      // 바로 대시보드로 이동 (pushReplacement로 루프 방지)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.of(context).pushReplacementNamed('/admin');
+      });
+      return const SizedBox(); // 화면 깜빡임 방지용
+    }
+
     final bool isDetailBoxVisible =
         _calendarKey.currentState?.selectedDetailDay != null;
 

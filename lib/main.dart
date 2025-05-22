@@ -17,6 +17,7 @@ import 'package:provider/provider.dart';
 import 'providers/login_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart'; // 추가된 import
 import 'package:flutter/foundation.dart';
+import 'admin/admin_dashboard.dart'; // 추가
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,11 +47,26 @@ class PlangramApp extends StatelessWidget {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       loginProvider.currentUser();
     });
-    final initialRoute =
-        FirebaseAuth.instance.currentUser != null ? '/success' : '/login';
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      initialRoute: initialRoute,
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final user = snapshot.data;
+          if (user == null) {
+            return LoginScreen();
+          }
+          final email = user.email?.toLowerCase();
+          if (email == 'admin@plangram.com') {
+            return const AdminDashboard();
+          }
+          return const SuccessScreen();
+        },
+      ),
       routes: {
         '/login': (context) => LoginScreen(),
         '/signup': (context) => SignUpScreen(),
@@ -60,6 +76,15 @@ class PlangramApp extends StatelessWidget {
         '/map': (context) => MapScreen(),
         '/notice': (context) => NoticeScreen(),
         '/todo': (context) => const TodoScreen(),
+        '/admin': (context) {
+          final user = FirebaseAuth.instance.currentUser;
+          final email = user?.email?.toLowerCase();
+          if (email == 'admin@plangram.com') {
+            return const AdminDashboard();
+          }
+          // 관리자가 아니면 캘린더(성공)로 강제 이동
+          return const SuccessScreen();
+        },
       },
     );
   }
