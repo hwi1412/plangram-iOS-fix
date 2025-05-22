@@ -51,6 +51,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return doc.data();
   }
 
+  Future<void> _logAdminAction({
+    required String targetUid,
+    required String targetEmail,
+    required String action,
+    String? reason,
+    String? adminEmail,
+  }) async {
+    await FirebaseFirestore.instance.collection('actions').add({
+      'targetUid': targetUid,
+      'targetEmail': targetEmail,
+      'action': action,
+      'reason': reason,
+      'adminEmail':
+          adminEmail ?? FirebaseAuth.instance.currentUser?.email ?? '',
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+  }
+
   Future<void> _updateUserStatus({
     required String uid,
     required String email,
@@ -81,6 +99,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
         .collection('users')
         .doc(uid)
         .update(updateData);
+
+    // 관리자 액션 로그 기록
+    await _logAdminAction(
+      targetUid: uid,
+      targetEmail: email,
+      action: actionText,
+      reason: suspendReason,
+      adminEmail: FirebaseAuth.instance.currentUser?.email,
+    );
 
     await _sendEmailNotification(
       toEmail: email,

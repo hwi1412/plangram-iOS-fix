@@ -17,6 +17,7 @@ class SignUpScreenState extends State<SignUpScreen> {
   final TextEditingController passwordController = TextEditingController();
   final TextEditingController confirmPasswordController =
       TextEditingController();
+  bool _agreedToEula = false;
 
   // 새 키워드 목록 생성 함수
   List<String> generateKeywords(String email) {
@@ -29,6 +30,12 @@ class SignUpScreenState extends State<SignUpScreen> {
 
   Future<void> signUp() async {
     if (_formKey.currentState!.validate()) {
+      if (!_agreedToEula) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('이용약관에 동의해야 회원가입이 가능합니다.')),
+        );
+        return;
+      }
       if (passwordController.text != confirmPasswordController.text) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('비밀번호가 일치하지 않습니다.')),
@@ -156,6 +163,32 @@ class SignUpScreenState extends State<SignUpScreen> {
                   }
                   return null;
                 },
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Checkbox(
+                    value: _agreedToEula,
+                    onChanged: (val) {
+                      setState(() {
+                        _agreedToEula = val ?? false;
+                      });
+                    },
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _agreedToEula = !_agreedToEula;
+                        });
+                      },
+                      child: const Text(
+                        '이용약관(타인에게 불쾌감을 주는 콘텐츠, 불법/음란/폭력/혐오/차별/욕설 등 금지)에 동의합니다.',
+                        style: TextStyle(color: Colors.white, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 20),
               TextButton(

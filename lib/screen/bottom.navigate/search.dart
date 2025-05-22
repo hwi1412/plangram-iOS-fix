@@ -287,8 +287,9 @@ class _SearchScreenState extends State<SearchScreen>
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(
-                          '신고가 정상적으로 접수되었습니다. 운영팀에서 검토 후 필요한 조치를 취할 예정입니다.',
+                          '신고가 정상적으로 접수되었습니다. 운영팀에서 검토 후 필요한 조치를 취할 예정입니다.\nReported content will be reviewed within 24 hours.',
                         ),
+                        duration: Duration(seconds: 5),
                       ),
                     );
                   },
