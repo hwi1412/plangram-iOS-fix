@@ -812,12 +812,101 @@ class _TodoScreenState extends State<TodoScreen> {
                               ),
                               PopupMenuButton<String>(
                                 icon: const Icon(Icons.more_vert),
-                                onSelected: (value) {
+                                onSelected: (value) async {
                                   if (value == 'report') {
                                     _showTodoReportDialog(todo);
+                                  } else if (value == 'edit') {
+                                    // 수정 다이얼로그
+                                    final controller =
+                                        TextEditingController(text: todo.text);
+                                    final result = await showDialog<String>(
+                                      context: context,
+                                      builder: (context) {
+                                        return AlertDialog(
+                                          title: const Text('할 일 수정'),
+                                          content: TextField(
+                                            controller: controller,
+                                            decoration: const InputDecoration(
+                                              hintText: "수정할 내용을 입력하세요",
+                                            ),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context),
+                                              child: const Text('취소'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(
+                                                  context,
+                                                  controller.text.trim()),
+                                              child: const Text('수정'),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                    if (result != null &&
+                                        result.isNotEmpty &&
+                                        result != todo.text) {
+                                      setState(() {
+                                        todo.text = result;
+                                      });
+                                      if (todo.id != null) {
+                                        await FirebaseFirestore.instance
+                                            .collection("todos")
+                                            .doc(todo.id)
+                                            .update({"text": result});
+                                      }
+                                    }
+                                  } else if (value == 'delete') {
+                                    // 삭제 확인 다이얼로그
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) {
+                                        return AlertDialog(
+                                          title: const Text('할 일 삭제'),
+                                          content: const Text(
+                                              '정말로 이 할 일을 삭제하시겠습니까?'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, false),
+                                              child: const Text('취소'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(context, true),
+                                              child: const Text('삭제',
+                                                  style: TextStyle(
+                                                      color: Colors.red)),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                    if (confirm == true && todo.id != null) {
+                                      await FirebaseFirestore.instance
+                                          .collection("todos")
+                                          .doc(todo.id)
+                                          .delete();
+                                      setState(() {
+                                        _selectedEvents.removeAt(index);
+                                        // _events[_selectedDay]도 동기화
+                                        _events[_selectedDay]?.remove(todo);
+                                      });
+                                    }
                                   }
                                 },
                                 itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('수정하기'),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('삭제하기'),
+                                  ),
                                   const PopupMenuItem(
                                     value: 'report',
                                     child: Text('신고하기'),
