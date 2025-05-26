@@ -41,22 +41,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
       final loginProvider = Provider.of<LoginProvider>(context, listen: false);
       if (loginProvider.user != null) {
-        // 이메일 인증 여부 확인 분기 제거
-        // if (!loginProvider.user!.emailVerified) {
-        //   await showDialog(
-        //     context: context,
-        //     barrierDismissible: false,
-        //     builder: (_) => SignUpCompleteModal(user: loginProvider.user!),
-        //   );
-        //   setState(() {
-        //     _isLoading = false;
-        //   });
-        //   return;
-        // }
+        // 디버깅: 로그인 후 토큰 claims 출력
+        final idToken = await loginProvider.user!.getIdTokenResult(true);
+        print(
+            'Custom claims for ${loginProvider.user!.email}: ${idToken.claims}');
         Navigator.pushNamed(context, '/success');
       } else {
         _showErrorMessage(loginProvider.errorMessage ?? '로그인 실패');
       }
+    } on FirebaseAuthException catch (e, stack) {
+      print("LoginScreen catch - 오류: $e");
+      print("LoginScreen catch - 스택 트레이스: $stack");
+      _showErrorMessage(
+          '로그인 중 오류가 발생했습니다. 다시 시도해주세요.\n${e.code}: ${e.message}');
     } catch (e, stack) {
       print("LoginScreen catch - 오류: $e");
       print("LoginScreen catch - 스택 트레이스: $stack");

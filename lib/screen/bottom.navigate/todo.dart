@@ -10,13 +10,20 @@ class Group {
   Group({required this.name, required this.members});
 }
 
-// 새 클래스 TodoItem 추가 (Firestore 문서 id 필드 추가)
+// TodoItem에 작성자 정보 필드 추가
 class TodoItem {
   String text;
   bool completed;
   String? id; // Firestore 문서 id
   String? group; // 할 일에 속한 그룹 (null이면 전체)
-  TodoItem(this.text, {this.completed = false, this.id, this.group});
+  String? creator; // 작성자 이메일
+  String? creatorName; // 작성자 이름
+  TodoItem(this.text,
+      {this.completed = false,
+      this.id,
+      this.group,
+      this.creator,
+      this.creatorName});
 }
 
 class TodoScreen extends StatefulWidget {
@@ -89,11 +96,29 @@ class _TodoScreenState extends State<TodoScreen> {
         // 그룹 필드가 null이면 개인 todo로 간주
         if (creator != currentEmail) continue;
       }
+
+      // 작성자 이름 가져오기
+      String? creatorName;
+      if (creator != null) {
+        final userQuery = await FirebaseFirestore.instance
+            .collection("users")
+            .where("email", isEqualTo: creator)
+            .limit(1)
+            .get();
+        if (userQuery.docs.isNotEmpty) {
+          creatorName = userQuery.docs.first.data()["name"] ?? creator;
+        } else {
+          creatorName = creator;
+        }
+      }
+
       TodoItem todo = TodoItem(
         data["text"],
         completed: data["completed"] ?? false,
         id: doc.id,
         group: data["group"],
+        creator: creator,
+        creatorName: creatorName,
       );
       if (loadedEvents[date] == null) {
         loadedEvents[date] = [];
@@ -433,6 +458,118 @@ class _TodoScreenState extends State<TodoScreen> {
     );
   }
 
+  // To-Do 신고 다이얼로그
+  Future<void> _showTodoReportDialog(TodoItem todo) async {
+    String? selectedReason;
+    TextEditingController customReasonController = TextEditingController();
+    final reasons = ["스팸/광고", "욕설/비방", "부적절한 내용", "기타"];
+    String? errorText;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              title: const Text('할 일 신고'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...reasons.map((reason) => RadioListTile<String>(
+                        title: Text(reason),
+                        value: reason,
+                        groupValue: selectedReason,
+                        onChanged: (val) {
+                          setModalState(() {
+                            selectedReason = val;
+                            errorText = null;
+                          });
+                        },
+                      )),
+                  if (selectedReason == "기타")
+                    TextField(
+                      controller: customReasonController,
+                      decoration: const InputDecoration(
+                        labelText: "신고 사유 입력",
+                      ),
+                      maxLength: 100,
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "신고 사유를 선택하거나 직접 입력해 주세요. 허위 신고 시 서비스 이용에 제한이 있을 수 있습니다.",
+                    style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic),
+                  ),
+                  if (errorText != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6.0),
+                      child: Text(
+                        errorText!,
+                        style: const TextStyle(color: Colors.red, fontSize: 13),
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('취소'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    String reason = selectedReason == "기타"
+                        ? customReasonController.text.trim()
+                        : (selectedReason ?? "");
+                    if (selectedReason == null) {
+                      setModalState(() {
+                        errorText = "신고 사유를 선택해 주세요.";
+                      });
+                      return;
+                    }
+                    if (selectedReason == "기타" && reason.isEmpty) {
+                      setModalState(() {
+                        errorText = "기타 사유를 입력해 주세요.";
+                      });
+                      return;
+                    }
+                    User? currentUser = FirebaseAuth.instance.currentUser;
+                    if (currentUser == null) return;
+
+                    await FirebaseFirestore.instance.collection("reports").add({
+                      "targetUid": null,
+                      "targetEmail": todo.creator,
+                      "targetName": todo.creatorName,
+                      "reporterUid": currentUser.uid,
+                      "reporterEmail": currentUser.email,
+                      "reason": reason,
+                      "todoId": todo.id,
+                      "todoText": todo.text,
+                      "type": "todo",
+                      "timestamp": FieldValue.serverTimestamp(),
+                    });
+
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          '신고가 정상적으로 접수되었습니다. 운영팀에서 검토 후 필요한 조치를 취할 예정입니다.\nReported content will be reviewed within 24 hours.',
+                        ),
+                        duration: Duration(seconds: 5),
+                      ),
+                    );
+                  },
+                  child: const Text('신고'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -623,122 +760,77 @@ class _TodoScreenState extends State<TodoScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children:
-                            List.generate(_selectedEvents.length, (index) {
-                          final item = _selectedEvents[index];
-                          return Dismissible(
-                            key: Key(item.id ?? '${item.text}-$index'),
-                            background: Container(
-                              color: Colors.blue,
-                              alignment: Alignment.centerLeft,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20),
-                              child:
-                                  const Icon(Icons.edit, color: Colors.white),
+              // === 아래 코드만 남기고 위쪽(중복) 리스트는 제거 ===
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: List.generate(_selectedEvents.length, (index) {
+                      final todo = _selectedEvents[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 0, vertical: 4),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.teal,
+                            child: Text(
+                              (todo.creatorName != null &&
+                                      todo.creatorName!.isNotEmpty)
+                                  ? todo.creatorName![0]
+                                  : '🙂',
+                              style: const TextStyle(color: Colors.white),
                             ),
-                            secondaryBackground: Container(
-                              color: Colors.red,
-                              alignment: Alignment.centerRight,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20),
-                              child:
-                                  const Icon(Icons.delete, color: Colors.white),
+                          ),
+                          title: Text(
+                            todo.text,
+                            style: TextStyle(
+                              decoration: todo.completed
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              color:
+                                  todo.completed ? Colors.grey : Colors.black,
                             ),
-                            confirmDismiss: (direction) async {
-                              if (direction == DismissDirection.startToEnd) {
-                                // 편집
-                                TextEditingController editController =
-                                    TextEditingController(text: item.text);
-                                await showDialog(
-                                  context: context,
-                                  builder: (context) {
-                                    return AlertDialog(
-                                      title: const Text("할 일 수정"),
-                                      content: TextField(
-                                        controller: editController,
-                                        decoration: const InputDecoration(
-                                          hintText: "수정할 내용을 입력하세요",
-                                        ),
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () {
-                                            Navigator.pop(context);
-                                          },
-                                          child: const Text("취소"),
-                                        ),
-                                        TextButton(
-                                          onPressed: () {
-                                            setState(() {
-                                              item.text = editController.text;
-                                              if (item.id != null) {
-                                                FirebaseFirestore.instance
-                                                    .collection("todos")
-                                                    .doc(item.id)
-                                                    .update(
-                                                        {"text": item.text});
-                                              }
-                                            });
-                                            Navigator.pop(context);
-                                          },
-                                          child: const Text("수정"),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                );
-                                return false;
-                              } else if (direction ==
-                                  DismissDirection.endToStart) {
-                                // 삭제
-                                if (item.id != null) {
-                                  FirebaseFirestore.instance
-                                      .collection("todos")
-                                      .doc(item.id)
-                                      .delete();
-                                }
-                                setState(() {
-                                  _events[_selectedDay]?.remove(item);
-                                });
-                                return true;
-                              }
-                              return false;
-                            },
-                            child: CheckboxListTile(
-                              contentPadding: const EdgeInsets.only(left: 50),
-                              value: item.completed,
-                              activeColor: Colors.green,
-                              controlAffinity: ListTileControlAffinity.leading,
-                              title: Text(
-                                item.text,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  decoration: item.completed
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                ),
+                          ),
+                          subtitle: Text(
+                            todo.creatorName ?? '',
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Checkbox(
+                                value: todo.completed,
+                                onChanged: (val) {
+                                  setState(() {
+                                    todo.completed = val ?? false;
+                                  });
+                                  _updateTodoCompletion(todo);
+                                },
                               ),
-                              onChanged: (value) {
-                                setState(() {
-                                  item.completed = value!;
-                                  _updateTodoCompletion(item);
-                                });
-                              },
-                            ),
-                          );
-                        }),
-                      ),
-                    ),
+                              PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert),
+                                onSelected: (value) {
+                                  if (value == 'report') {
+                                    _showTodoReportDialog(todo);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'report',
+                                    child: Text('신고하기'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
                   ),
-                ],
+                ),
               ),
             ],
           ),
