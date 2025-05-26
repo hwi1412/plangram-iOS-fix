@@ -253,6 +253,125 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  // 친구 신고 다이얼로그 (search.dart 참고)
+  Future<void> _showFriendReportDialog(String targetEmail) async {
+    String? selectedReason;
+    TextEditingController customReasonController = TextEditingController();
+    final reasons = ["스팸/광고", "욕설/비방", "부적절한 프로필", "기타"];
+    String? errorText;
+
+    // targetUid 조회
+    String? targetUid;
+    var query = await FirebaseFirestore.instance
+        .collection("users")
+        .where("email", isEqualTo: targetEmail)
+        .limit(1)
+        .get();
+    if (query.docs.isNotEmpty) {
+      targetUid = query.docs.first.id;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              title: const Text('사용자 신고'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...reasons.map((reason) => RadioListTile<String>(
+                        title: Text(reason),
+                        value: reason,
+                        groupValue: selectedReason,
+                        onChanged: (val) {
+                          setModalState(() {
+                            selectedReason = val;
+                            errorText = null;
+                          });
+                        },
+                      )),
+                  if (selectedReason == "기타")
+                    TextField(
+                      controller: customReasonController,
+                      decoration: const InputDecoration(
+                        labelText: "신고 사유 입력",
+                      ),
+                      maxLength: 100,
+                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "신고 사유를 선택하거나 직접 입력해 주세요. 허위 신고 시 서비스 이용에 제한이 있을 수 있습니다.",
+                    style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic),
+                  ),
+                  if (errorText != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6.0),
+                      child: Text(
+                        errorText!,
+                        style: const TextStyle(color: Colors.red, fontSize: 13),
+                      ),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('취소'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    String reason = selectedReason == "기타"
+                        ? customReasonController.text.trim()
+                        : (selectedReason ?? "");
+                    if (selectedReason == null) {
+                      setModalState(() {
+                        errorText = "신고 사유를 선택해 주세요.";
+                      });
+                      return;
+                    }
+                    if (selectedReason == "기타" && reason.isEmpty) {
+                      setModalState(() {
+                        errorText = "기타 사유를 입력해 주세요.";
+                      });
+                      return;
+                    }
+                    User? currentUser = FirebaseAuth.instance.currentUser;
+                    if (currentUser == null) return;
+
+                    await FirebaseFirestore.instance.collection("reports").add({
+                      "targetUid": targetUid,
+                      "targetEmail": targetEmail,
+                      "reporterUid": currentUser.uid,
+                      "reporterEmail": currentUser.email,
+                      "reason": reason,
+                      "timestamp": FieldValue.serverTimestamp(),
+                    });
+
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          '신고가 정상적으로 접수되었습니다. 운영팀에서 검토 후 필요한 조치를 취할 예정입니다.\nReported content will be reviewed within 24 hours.',
+                        ),
+                        duration: Duration(seconds: 5),
+                      ),
+                    );
+                  },
+                  child: const Text('신고'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -406,6 +525,20 @@ class _MapScreenState extends State<MapScreen> {
                   onTap: () {
                     _loadFriendSchedules(friendEmail);
                   },
+                  trailing: PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: Colors.white),
+                    onSelected: (value) {
+                      if (value == 'report') {
+                        _showFriendReportDialog(friendEmail);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'report',
+                        child: Text('신고하기'),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
