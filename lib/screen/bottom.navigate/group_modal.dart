@@ -469,6 +469,12 @@ class _TodoScreenState extends State<TodoScreen> {
                                     content: Text("사용자가 인증되지 않았습니다.")));
                             return;
                           }
+                          // 이메일로 변환
+                          final members = [
+                            ...selectedMembers,
+                            if (myEmail != null) myEmail
+                          ];
+                          final emailMembers = await _ensureEmails(members);
                           if (group != null) {
                             // 기존 그룹 수정: Firestore 업데이트
                             var query = await FirebaseFirestore.instance
@@ -480,10 +486,7 @@ class _TodoScreenState extends State<TodoScreen> {
                             for (var doc in query.docs) {
                               await doc.reference.update({
                                 "groupName": groupController.text.trim(),
-                                "members": [
-                                  ...selectedMembers,
-                                  if (myEmail != null) myEmail
-                                ]
+                                "members": emailMembers,
                               });
                             }
                           } else {
@@ -493,10 +496,7 @@ class _TodoScreenState extends State<TodoScreen> {
                                 .collection("groups")
                                 .add({
                               "groupName": groupController.text.trim(),
-                              "members": [
-                                ...selectedMembers,
-                                if (myEmail != null) myEmail
-                              ],
+                              "members": emailMembers,
                             });
                           }
                           await _loadGroups();
@@ -516,6 +516,27 @@ class _TodoScreenState extends State<TodoScreen> {
         });
       },
     );
+  }
+
+  Future<List<String>> _ensureEmails(List<dynamic> members) async {
+    List<String> emails = [];
+    for (var m in members) {
+      if (m is String && m.contains('@')) {
+        emails.add(m);
+      } else if (m is String) {
+        final q = await FirebaseFirestore.instance
+            .collection("users")
+            .where("name", isEqualTo: m)
+            .limit(1)
+            .get();
+        if (q.docs.isNotEmpty) {
+          emails.add(q.docs.first.data()["email"] ?? m);
+        } else {
+          emails.add(m);
+        }
+      }
+    }
+    return emails;
   }
 
   // To-Do 신고 다이얼로그
@@ -845,7 +866,6 @@ class _TodoScreenState extends State<TodoScreen> {
                       final myEmail = currentUser?.email ?? "";
                       // 그룹 멤버 체크박스(본인 제외, 최대 6명)
                       final memberCheckboxes = todo.groupMembers
-                          .where((e) => e != myEmail)
                           .take(6)
                           .map((memberEmail) => Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -853,11 +873,15 @@ class _TodoScreenState extends State<TodoScreen> {
                                   Checkbox(
                                     value: todo.completedMembers
                                         .contains(memberEmail),
-                                    onChanged: (val) {
-                                      _toggleMemberCompletion(
-                                          todo, memberEmail, val ?? false);
-                                    },
-                                    activeColor: Colors.green,
+                                    onChanged: memberEmail == myEmail
+                                        ? (val) async {
+                                            _toggleMemberCompletion(todo,
+                                                memberEmail, val ?? false);
+                                          }
+                                        : null,
+                                    activeColor: memberEmail == myEmail
+                                        ? Colors.green
+                                        : Colors.grey,
                                   ),
                                   FutureBuilder<QuerySnapshot>(
                                     future: FirebaseFirestore.instance
