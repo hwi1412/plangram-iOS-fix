@@ -18,16 +18,27 @@ class TodoItem {
   String? group; // 할 일에 속한 그룹 (null이면 전체)
   String? creator; // 작성자 이메일
   String? creatorName; // 작성자 이름
-  TodoItem(this.text,
-      {this.completed = false,
-      this.id,
-      this.group,
-      this.creator,
-      this.creatorName});
+  DateTime date; // 추가: 날짜 필드
+  List<String> groupMembers; // 추가: 그룹 멤버 리스트
+  List<String> completedMembers; // 추가: 완료한 멤버 리스트
+
+  TodoItem(
+    this.text, {
+    this.completed = false,
+    this.id,
+    this.group,
+    this.creator,
+    this.creatorName,
+    required this.date,
+    List<String>? groupMembers,
+    List<String>? completedMembers,
+  })  : groupMembers = groupMembers ?? [],
+        completedMembers = completedMembers ?? [];
 }
 
 class TodoScreen extends StatefulWidget {
   const TodoScreen({super.key});
+
   @override
   State<TodoScreen> createState() => _TodoScreenState();
 }
@@ -40,7 +51,7 @@ class _TodoScreenState extends State<TodoScreen> {
   CalendarFormat _calendarFormat = CalendarFormat.week; // 기본값을 주간으로 변경
 
   // 날짜별 To-Do 리스트를 저장하는 상태 변수
-  final Map<DateTime, List<TodoItem>> _events = {};
+  final Map<DateTime, Map<String, TodoItem>> _events = {}; // compoundKey 구조로 변경
 
   // 그룹 관련 상태 변수 수정
   List<Group> _groups = [];
@@ -48,16 +59,27 @@ class _TodoScreenState extends State<TodoScreen> {
 
   // 선택된 날짜의 To-Do 리스트 getter (그룹 필터 적용)
   List<TodoItem> get _selectedEvents {
-    final events = _events[_selectedDay] ?? <TodoItem>[];
+    final events = _events[_selectedDay]?.values.toList() ?? <TodoItem>[];
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final myEmail = currentUser?.email ?? "";
     if (_selectedGroup == "My") {
-      return events.where((e) => e.group == "MY").toList();
+      // 내 투두 리스트(개인화된 MY 리스트)
+      return events
+          .where((e) => e.group == "MY" && e.creator == myEmail)
+          .toList();
     }
-    final filtered = _selectedGroup == "전체 보기"
-        ? events
-        : events.where((e) => e.group == _selectedGroup).toList();
-    filtered
-        .sort((a, b) => (a.completed ? 1 : 0).compareTo(b.completed ? 1 : 0));
-    return filtered;
+    if (_selectedGroup == "전체 보기") {
+      // 내가 소속된 그룹만 필터 (내 그룹: 그룹 멤버에 내 이메일이 포함된 그룹)
+      final myGroups = _groups.map((g) => g.name).toSet();
+      return events
+          .where((e) => e.group == "MY" || myGroups.contains(e.group))
+          .toList();
+    }
+    // 특정 그룹 선택 시, 해당 그룹 todo (해당 그룹에 현재 사용자가 소속되어 있어야 함)
+    return events
+        .where((e) =>
+            e.group == _selectedGroup && e.groupMembers.contains(myEmail))
+        .toList();
   }
 
   // 새 입력을 위한 텍스트 컨트롤러 추가
@@ -75,7 +97,7 @@ class _TodoScreenState extends State<TodoScreen> {
     String currentEmail = currentUser.email!;
     QuerySnapshot snapshot =
         await FirebaseFirestore.instance.collection("todos").get();
-    Map<DateTime, List<TodoItem>> loadedEvents = {};
+    Map<DateTime, Map<String, TodoItem>> loadedEvents = {};
     for (var doc in snapshot.docs) {
       final data = doc.data() as Map<String, dynamic>;
       String dateStr = data["date"] ?? "";
@@ -85,15 +107,12 @@ class _TodoScreenState extends State<TodoScreen> {
       String? creator = data["creator"];
       List<String> groupMembers = List<String>.from(data["groupMembers"] ?? []);
 
-      // 접근 권한 체크:
+      // 접근 권한 체크
       if (docGroup == "MY") {
-        // 개인 todo: 본인이 작성한 경우만 표시
         if (creator != currentEmail) continue;
       } else if (docGroup != null) {
-        // 그룹 todo: 해당 그룹의 멤버(이메일)만 표시
         if (!groupMembers.contains(currentEmail)) continue;
       } else {
-        // 그룹 필드가 null이면 개인 todo로 간주
         if (creator != currentEmail) continue;
       }
 
@@ -119,11 +138,15 @@ class _TodoScreenState extends State<TodoScreen> {
         group: data["group"],
         creator: creator,
         creatorName: creatorName,
+        date: date, // 날짜 필드 추가
+        groupMembers: groupMembers, // 그룹 멤버 리스트
+        completedMembers:
+            List<String>.from(data["completedMembers"] ?? []), // 완료한 멤버 리스트
       );
       if (loadedEvents[date] == null) {
-        loadedEvents[date] = [];
+        loadedEvents[date] = {};
       }
-      loadedEvents[date]!.add(todo);
+      loadedEvents[date]![doc.id] = todo;
     }
     setState(() {
       _events.clear();
@@ -292,10 +315,10 @@ class _TodoScreenState extends State<TodoScreen> {
     }).then((docRef) {
       setState(() {
         if (_events[_selectedDay] == null) {
-          _events[_selectedDay] = [];
+          _events[_selectedDay] = {};
         }
-        _events[_selectedDay]!
-            .add(TodoItem(todo, id: docRef.id, group: groupField));
+        _events[_selectedDay]![docRef.id] = TodoItem(todo,
+            id: docRef.id, group: groupField, date: _selectedDay);
       });
     });
   }
@@ -570,6 +593,29 @@ class _TodoScreenState extends State<TodoScreen> {
     );
   }
 
+  void _deleteTodo(String compoundKey, DateTime date) async {
+    setState(() {
+      _events[date]?.remove(compoundKey);
+    });
+    await FirebaseFirestore.instance
+        .collection("todos")
+        .doc(compoundKey)
+        .delete();
+  }
+
+  void _editTodo(String compoundKey, DateTime date, String newText) async {
+    final todo = _events[date]?[compoundKey];
+    if (todo != null) {
+      setState(() {
+        todo.text = newText;
+      });
+      await FirebaseFirestore.instance
+          .collection("todos")
+          .doc(compoundKey)
+          .update({'text': newText});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -651,9 +697,10 @@ class _TodoScreenState extends State<TodoScreen> {
                         markerBuilder: (context, day, events) {
                           final normalizedDay =
                               DateTime(day.year, day.month, day.day);
-                          final items = _events[normalizedDay] ?? [];
-                          if (items.isNotEmpty) {
-                            final displayItems = items.take(9).toList();
+                          final itemsList =
+                              _events[normalizedDay]?.values.toList() ?? [];
+                          if (itemsList.isNotEmpty) {
+                            final displayItems = itemsList.take(9).toList();
                             return Positioned(
                               bottom: 1,
                               left: 0,
@@ -769,152 +816,41 @@ class _TodoScreenState extends State<TodoScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: List.generate(_selectedEvents.length, (index) {
                       final todo = _selectedEvents[index];
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 0, vertical: 4),
+                      final colorOpacity = todo.completedMembers.length ==
+                              todo.groupMembers.length
+                          ? 0.3
+                          : 1.0;
+                      return Dismissible(
+                        key: Key(todo.id!),
+                        onDismissed: (_) => _deleteTodo(todo.id!, todo.date),
                         child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Colors.teal,
-                            child: Text(
-                              (todo.creatorName != null &&
-                                      todo.creatorName!.isNotEmpty)
-                                  ? todo.creatorName![0]
-                                  : '🙂',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                          title: Text(
-                            todo.text,
-                            style: TextStyle(
-                              decoration: todo.completed
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              color:
-                                  todo.completed ? Colors.grey : Colors.black,
-                            ),
-                          ),
-                          subtitle: Text(
-                            todo.creatorName ?? '',
-                            style: const TextStyle(
-                                fontSize: 12, color: Colors.grey),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
+                          leading: Stack(
                             children: [
-                              Checkbox(
-                                value: todo.completed,
-                                onChanged: (val) {
-                                  setState(() {
-                                    todo.completed = val ?? false;
-                                  });
-                                  _updateTodoCompletion(todo);
-                                },
-                              ),
-                              PopupMenuButton<String>(
-                                icon: const Icon(Icons.more_vert),
-                                onSelected: (value) async {
-                                  if (value == 'report') {
-                                    _showTodoReportDialog(todo);
-                                  } else if (value == 'edit') {
-                                    // 수정 다이얼로그
-                                    final controller =
-                                        TextEditingController(text: todo.text);
-                                    final result = await showDialog<String>(
-                                      context: context,
-                                      builder: (context) {
-                                        return AlertDialog(
-                                          title: const Text('할 일 수정'),
-                                          content: TextField(
-                                            controller: controller,
-                                            decoration: const InputDecoration(
-                                              hintText: "수정할 내용을 입력하세요",
-                                            ),
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context),
-                                              child: const Text('취소'),
-                                            ),
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(
-                                                  context,
-                                                  controller.text.trim()),
-                                              child: const Text('수정'),
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                    if (result != null &&
-                                        result.isNotEmpty &&
-                                        result != todo.text) {
+                              CircleAvatar(child: Text(todo.group![0])),
+                              Row(
+                                children:
+                                    todo.groupMembers.take(6).map((member) {
+                                  return Checkbox(
+                                    value:
+                                        todo.completedMembers.contains(member),
+                                    onChanged: (checked) {
                                       setState(() {
-                                        todo.text = result;
+                                        if (checked == true) {
+                                          todo.completedMembers.add(member);
+                                        } else {
+                                          todo.completedMembers.remove(member);
+                                        }
                                       });
-                                      if (todo.id != null) {
-                                        await FirebaseFirestore.instance
-                                            .collection("todos")
-                                            .doc(todo.id)
-                                            .update({"text": result});
-                                      }
-                                    }
-                                  } else if (value == 'delete') {
-                                    // 삭제 확인 다이얼로그
-                                    final confirm = await showDialog<bool>(
-                                      context: context,
-                                      builder: (context) {
-                                        return AlertDialog(
-                                          title: const Text('할 일 삭제'),
-                                          content: const Text(
-                                              '정말로 이 할 일을 삭제하시겠습니까?'),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context, false),
-                                              child: const Text('취소'),
-                                            ),
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(context, true),
-                                              child: const Text('삭제',
-                                                  style: TextStyle(
-                                                      color: Colors.red)),
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                    if (confirm == true && todo.id != null) {
-                                      await FirebaseFirestore.instance
-                                          .collection("todos")
-                                          .doc(todo.id)
-                                          .delete();
-                                      setState(() {
-                                        _selectedEvents.removeAt(index);
-                                        // _events[_selectedDay]도 동기화
-                                        _events[_selectedDay]?.remove(todo);
-                                      });
-                                    }
-                                  }
-                                },
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('수정하기'),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('삭제하기'),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'report',
-                                    child: Text('신고하기'),
-                                  ),
-                                ],
+                                    },
+                                  );
+                                }).toList(),
                               ),
                             ],
                           ),
+                          title: Text(todo.text),
+                          onLongPress: () =>
+                              _showEditDialog(todo.id!, todo.date, todo.text),
+                          tileColor: Colors.grey.withOpacity(colorOpacity),
                         ),
                       );
                     }),
@@ -984,6 +920,28 @@ class _TodoScreenState extends State<TodoScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  void _showEditDialog(String compoundKey, DateTime date, String currentText) {
+    final controller = TextEditingController(text: currentText);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text("Edit Todo"),
+          content: TextField(controller: controller),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _editTodo(compoundKey, date, controller.text.trim());
+                Navigator.pop(context);
+              },
+              child: Text("Save"),
+            ),
+          ],
+        );
+      },
     );
   }
 }
