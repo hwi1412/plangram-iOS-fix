@@ -13,26 +13,22 @@ class Group {
 // TodoItem에 completedMembers 필드 추가
 class TodoItem {
   String text;
+  List<String> completedMembers; // ✅ 체크한 멤버 이메일
   String? id;
   String? group;
   String? creator;
   String? creatorName;
-  List<String> groupMembers;
-  Map<String, bool> completed; // email -> bool
-  DateTime? createdAt;
-  DateTime? updatedAt;
+  List<String> groupMembers; // 전체 멤버
   TodoItem(
     this.text, {
+    this.completedMembers = const [],
     this.id,
     this.group,
     this.creator,
     this.creatorName,
     this.groupMembers = const [],
-    this.completed = const {},
-    this.createdAt,
-    this.updatedAt,
   });
-  int get completedCount => completed.values.where((v) => v).length;
+  int get completedCount => completedMembers.length;
   int get memberCount => groupMembers.length;
   double get completionRate =>
       memberCount == 0 ? 0 : completedCount / memberCount;
@@ -55,14 +51,12 @@ class _TodoScreenState extends State<TodoScreen> {
   // 날짜별 To-Do 리스트를 저장하는 상태 변수
   // _events 구조 변경: Map<DateTime, Map<compoundKey, TodoItem>>
   final Map<DateTime, Map<String, TodoItem>> _events = {};
-  final Map<String, Map<String, dynamic>> _userCache =
-      {}; // email -> {name, photoUrl}
 
   // 그룹 관련 상태 변수 수정
   List<Group> _groups = [];
   String _selectedGroup = "전체 보기"; // 기본 전체보기
 
-  // 선택된 날짜의 To-Do 리스트 getter (정렬: 완료율 낮은 순, 텍스트 사전순)
+  // 선택된 날짜의 To-Do 리스트 getter (그룹 필터 적용, 정렬 포함)
   List<TodoItem> get _selectedEvents {
     final dayEvents = _events[_selectedDay] ?? {};
     List<TodoItem> filtered;
@@ -151,14 +145,12 @@ class _TodoScreenState extends State<TodoScreen> {
       final compoundKey = "${docGroup ?? "MY"}|$text";
       final todo = TodoItem(
         text,
+        completedMembers: completedMembers,
         id: doc.id,
         group: docGroup,
         creator: creator,
         creatorName: creatorName,
         groupMembers: groupMembers,
-        completed: {},
-        createdAt: (data["createdAt"] as Timestamp?)?.toDate(),
-        updatedAt: (data["updatedAt"] as Timestamp?)?.toDate(),
       );
       loadedEvents[date] ??= {};
       // 중복 방지: 같은 날짜+텍스트+그룹 조합 하나만 유지
@@ -168,116 +160,6 @@ class _TodoScreenState extends State<TodoScreen> {
       _events.clear();
       _events.addAll(loadedEvents);
     });
-  }
-
-  // 친구 목록을 [{name, email}] 형태로 반환
-
-  // 실시간 Firestore 스트림 구독 및 마이그레이션
-  Stream<QuerySnapshot> get _todoStream =>
-      FirebaseFirestore.instance.collection("todos").snapshots();
-
-  @override
-  void initState() {
-    super.initState();
-    _loadGroups();
-    _listenTodos();
-  }
-
-  void _listenTodos() {
-    User? currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) return;
-    final myEmail = currentUser.email!;
-    _todoStream.listen((snapshot) async {
-      final myGroups = _groups.map((g) => g.name).toSet();
-      Map<DateTime, Map<String, TodoItem>> loadedEvents = {};
-      for (var doc in snapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        // 마이그레이션: 스키마가 다르면 변환
-        if (!data.containsKey('completed') || data['completed'] == null) {
-          // old schema → migrate
-          Map<String, bool> completed = {};
-          List<String> groupMembers =
-              List<String>.from(data["groupMembers"] ?? []);
-          if (data.containsKey('completedMembers')) {
-            for (var m in groupMembers) {
-              completed[m] = (data['completedMembers'] as List).contains(m);
-            }
-          } else {
-            for (var m in groupMembers) {
-              completed[m] = false;
-            }
-          }
-          await doc.reference.update({
-            "completed": completed,
-            "updatedAt": FieldValue.serverTimestamp(),
-          });
-        }
-        // 필터
-        final group = data["group"];
-        final creator = data["creator"];
-        final groupMembers = List<String>.from(data["groupMembers"] ?? []);
-        if (group == "MY") {
-          if (creator != myEmail) continue;
-        } else if (group != null) {
-          if (!groupMembers.contains(myEmail)) continue;
-        } else {
-          if (creator != myEmail) continue;
-        }
-        // 날짜/키
-        String dateStr = data["date"] ?? "";
-        DateTime date = DateTime.parse(dateStr);
-        date = DateTime(date.year, date.month, date.day);
-        final text = data["text"] ?? "";
-        final compoundKey = "${group ?? "MY"}|$text";
-        // completed
-        Map<String, bool> completed = {};
-        if (data["completed"] is Map) {
-          completed = Map<String, bool>.from(data["completed"]);
-        }
-        // 프로필 캐시
-        String? creatorName;
-        if (creator != null) {
-          creatorName = await _getUserName(creator);
-        }
-        loadedEvents[date] ??= {};
-        loadedEvents[date]![compoundKey] = TodoItem(
-          text,
-          id: doc.id,
-          group: group,
-          creator: creator,
-          creatorName: creatorName,
-          groupMembers: groupMembers,
-          completed: completed,
-          createdAt: (data["createdAt"] as Timestamp?)?.toDate(),
-          updatedAt: (data["updatedAt"] as Timestamp?)?.toDate(),
-        );
-      }
-      setState(() {
-        _events.clear();
-        _events.addAll(loadedEvents);
-      });
-    });
-  }
-
-  // 유저 정보 캐시
-  Future<String> _getUserName(String email) async {
-    if (_userCache.containsKey(email)) {
-      return _userCache[email]?['name'] ?? email;
-    }
-    final q = await FirebaseFirestore.instance
-        .collection("users")
-        .where("email", isEqualTo: email)
-        .limit(1)
-        .get();
-    if (q.docs.isNotEmpty) {
-      final data = q.docs.first.data();
-      _userCache[email] = {
-        "name": data["name"] ?? email,
-        "photoUrl": data["profileUrl"] ?? "",
-      };
-      return data["name"] ?? email;
-    }
-    return email;
   }
 
   // Firestore에서 그룹 정보를 불러오는 함수
@@ -398,8 +280,14 @@ class _TodoScreenState extends State<TodoScreen> {
     return friendList;
   }
 
-  // To-Do 추가/갱신
-  Future<void> _addTodoItem(String todo) async {
+  @override
+  void initState() {
+    super.initState();
+    _loadGroups(); // 그룹 로드 추가
+    _loadTodosFromFirestore();
+  }
+
+  void _addTodoItem(String todo) async {
     final dateString = _formatDate(_selectedDay);
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
@@ -418,7 +306,7 @@ class _TodoScreenState extends State<TodoScreen> {
       }
     }
     final compoundKey = "$groupField|$todo";
-    // 중복 방지: 동일한 날짜+텍스트+그룹 존재 시 merge
+    // 중복 방지: Firestore에서 동일한 날짜+텍스트+그룹 존재 시 덮어쓰기
     final query = await FirebaseFirestore.instance
         .collection("todos")
         .where("date", isEqualTo: dateString)
@@ -426,48 +314,50 @@ class _TodoScreenState extends State<TodoScreen> {
         .where("group", isEqualTo: groupField)
         .limit(1)
         .get();
-    Map<String, bool> completedMap = {};
-    for (var m in groupMembers) {
-      completedMap[m] = false;
-    }
     if (query.docs.isNotEmpty) {
-      // merge: groupMembers/creator 유지, completed 확장
-      final doc = query.docs.first;
-      final data = doc.data();
-      final oldCompleted = Map<String, bool>.from(data["completed"] ?? {});
-      for (var m in groupMembers) {
-        completedMap[m] = oldCompleted[m] ?? false;
-      }
-      await doc.reference.update({
-        "groupMembers": groupMembers,
-        "completed": completedMap,
-        "updatedAt": FieldValue.serverTimestamp(),
-      });
+      // 이미 존재: 무시 또는 수정
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("이미 같은 할 일이 존재합니다.")));
       return;
     }
-    await FirebaseFirestore.instance.collection("todos").add({
+    final docRef = await FirebaseFirestore.instance.collection("todos").add({
       "date": dateString,
       "text": todo,
+      "completedMembers": [],
       "group": groupField,
       "groupMembers": groupMembers,
-      "completed": completedMap,
       "creator": currentUser.email,
-      "createdAt": FieldValue.serverTimestamp(),
-      "updatedAt": FieldValue.serverTimestamp(),
+    });
+    setState(() {
+      _events[_selectedDay] ??= {};
+      _events[_selectedDay]![compoundKey] = TodoItem(
+        todo,
+        id: docRef.id,
+        group: groupField,
+        groupMembers: groupMembers,
+        completedMembers: [],
+        creator: currentUser.email,
+      );
     });
   }
 
-  // 체크박스 상태 변경 (본인만 가능)
-  Future<void> _toggleMemberCompletion(
+  // 체크박스 상태 변경 시 Firestore 업데이트 (completedMembers)
+  void _toggleMemberCompletion(
       TodoItem item, String memberEmail, bool checked) async {
-    User? currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null || memberEmail != currentUser.email) return;
-    if (item.id != null) {
-      await FirebaseFirestore.instance.collection("todos").doc(item.id).update({
-        "completed.$memberEmail": checked,
-        "updatedAt": FieldValue.serverTimestamp()
-      });
+    final updated = [...item.completedMembers];
+    if (checked) {
+      if (!updated.contains(memberEmail)) updated.add(memberEmail);
+    } else {
+      updated.remove(memberEmail);
     }
+    item.completedMembers = updated;
+    if (item.id != null) {
+      await FirebaseFirestore.instance
+          .collection("todos")
+          .doc(item.id)
+          .update({"completedMembers": updated});
+    }
+    setState(() {});
   }
 
   // 그룹 생성/수정 모달: 친구(멤버) 선택 체크박스에서 본인 이메일 제외
@@ -839,16 +729,17 @@ class _TodoScreenState extends State<TodoScreen> {
                                     margin: const EdgeInsets.symmetric(
                                         horizontal: 1),
                                     decoration: BoxDecoration(
-                                      color:
-                                          displayItems[index].completedCount ==
-                                                      displayItems[index]
-                                                          .groupMembers
-                                                          .length &&
+                                      color: displayItems[index]
+                                                      .completedMembers
+                                                      .length ==
                                                   displayItems[index]
                                                       .groupMembers
-                                                      .isNotEmpty
-                                              ? Colors.green
-                                              : Colors.red,
+                                                      .length &&
+                                              displayItems[index]
+                                                  .groupMembers
+                                                  .isNotEmpty
+                                          ? Colors.green
+                                          : Colors.red,
                                       shape: BoxShape.circle,
                                     ),
                                   ),
@@ -947,52 +838,48 @@ class _TodoScreenState extends State<TodoScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: List.generate(_selectedEvents.length, (index) {
                       final todo = _selectedEvents[index];
-                      final isAllCompleted =
-                          todo.completedCount == todo.memberCount &&
-                              todo.memberCount > 0;
+                      final isAllCompleted = todo.completedMembers.length ==
+                              todo.groupMembers.length &&
+                          todo.groupMembers.isNotEmpty;
                       final currentUser = FirebaseAuth.instance.currentUser;
                       final myEmail = currentUser?.email ?? "";
-                      // 모든 멤버(본인 포함) 체크박스+아바타
+                      // 그룹 멤버 체크박스(본인 제외, 최대 6명)
                       final memberCheckboxes = todo.groupMembers
+                          .where((e) => e != myEmail)
                           .take(6)
                           .map((memberEmail) => Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  FutureBuilder<Map<String, dynamic>>(
-                                    future: _getUserProfile(memberEmail),
-                                    builder: (context, snap) {
-                                      final name =
-                                          snap.data?['name'] ?? memberEmail;
-                                      final photoUrl =
-                                          snap.data?['photoUrl'] ?? '';
-                                      return CircleAvatar(
-                                        radius: 13,
-                                        backgroundColor: Colors.grey.shade400,
-                                        backgroundImage: photoUrl.isNotEmpty
-                                            ? NetworkImage(photoUrl)
-                                            : null,
-                                        child: photoUrl.isEmpty
-                                            ? Text(
-                                                name.isNotEmpty
-                                                    ? name[0]
-                                                    : '🙂',
-                                                style: const TextStyle(
-                                                    fontSize: 13,
-                                                    color: Colors.white),
-                                              )
-                                            : null,
+                                  Checkbox(
+                                    value: todo.completedMembers
+                                        .contains(memberEmail),
+                                    onChanged: (val) {
+                                      _toggleMemberCompletion(
+                                          todo, memberEmail, val ?? false);
+                                    },
+                                    activeColor: Colors.green,
+                                  ),
+                                  FutureBuilder<QuerySnapshot>(
+                                    future: FirebaseFirestore.instance
+                                        .collection("users")
+                                        .where("email", isEqualTo: memberEmail)
+                                        .limit(1)
+                                        .get(),
+                                    builder: (context, snapshot) {
+                                      String display = memberEmail;
+                                      if (snapshot.hasData &&
+                                          snapshot.data!.docs.isNotEmpty) {
+                                        display =
+                                            (snapshot.data!.docs.first.data()
+                                                    as Map<String,
+                                                        dynamic>)["name"] ??
+                                                memberEmail;
+                                      }
+                                      return Text(
+                                        display,
+                                        style: const TextStyle(fontSize: 12),
                                       );
                                     },
-                                  ),
-                                  Checkbox(
-                                    value: todo.completed[memberEmail] ?? false,
-                                    onChanged: memberEmail == myEmail
-                                        ? (val) => _toggleMemberCompletion(
-                                            todo, memberEmail, val ?? false)
-                                        : null,
-                                    activeColor: memberEmail == myEmail
-                                        ? Colors.green
-                                        : Colors.grey,
                                   ),
                                 ],
                               ))
@@ -1102,10 +989,16 @@ class _TodoScreenState extends State<TodoScreen> {
                                         : Colors.black,
                                   ),
                                 ),
-                                subtitle: Wrap(
-                                  spacing: 8,
-                                  children: memberCheckboxes,
-                                ),
+                                subtitle: todo.groupMembers.length > 1
+                                    ? Wrap(
+                                        spacing: 8,
+                                        children: memberCheckboxes,
+                                      )
+                                    : Text(
+                                        todo.creatorName ?? '',
+                                        style: const TextStyle(
+                                            fontSize: 12, color: Colors.grey),
+                                      ),
                                 trailing: PopupMenuButton<String>(
                                   icon: const Icon(Icons.more_vert),
                                   onSelected: (value) async {
@@ -1215,24 +1108,5 @@ class _TodoScreenState extends State<TodoScreen> {
         ),
       ),
     );
-  }
-
-  // 유저 프로필 캐시 + 로딩
-  Future<Map<String, dynamic>> _getUserProfile(String email) async {
-    if (_userCache.containsKey(email)) return _userCache[email]!;
-    final q = await FirebaseFirestore.instance
-        .collection("users")
-        .where("email", isEqualTo: email)
-        .limit(1)
-        .get();
-    if (q.docs.isNotEmpty) {
-      final data = q.docs.first.data();
-      _userCache[email] = {
-        "name": data["name"] ?? email,
-        "photoUrl": data["profileUrl"] ?? "",
-      };
-      return _userCache[email]!;
-    }
-    return {"name": email, "photoUrl": ""};
   }
 }
