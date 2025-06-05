@@ -466,6 +466,17 @@ class ChatAuthScreenState extends State<ChatAuthScreen> {
                 color: Colors.black, // 단색 검정색으로 변경
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Text(
+                '부적절하거나 불쾌감을 줄 수 있는 컨텐츠는 제재를 받을 수 있습니다.',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 13,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
           ],
         ),
       ),
