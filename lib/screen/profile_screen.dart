@@ -386,20 +386,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             OutlinedButton(
                               onPressed: _updateProfilePhoto,
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.pink,
-                                side: const BorderSide(color: Colors.pink),
+                                foregroundColor:
+                                    const Color.fromARGB(255, 255, 255, 255),
+                                side: const BorderSide(
+                                    color: Color.fromARGB(255, 124, 77, 167)),
                               ),
                               child: const Text('프로필 수정'),
                             ),
-                            const SizedBox(height: 16),
-                            ElevatedButton(
-                              onPressed: _deleteAccount,
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red),
-                              child: const Text("계정 삭제",
-                                  style: TextStyle(color: Colors.white)),
-                            ),
                           ],
+                        ),
+                        // 계정 삭제/문의하기 텍스트 버튼을 아래에 배치
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 24.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextButton(
+                                onPressed: _deleteAccount,
+                                child: const Text(
+                                  "계정 삭제",
+                                  style: TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 16,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('문의 안내'),
+                                      content: const Text(
+                                        '문의 메일: dean7767@naver.com\n\n'
+                                        '앱 관련 문의사항이나 불편사항이 있으시면 위 메일로 연락해 주세요.',
+                                        style: TextStyle(fontSize: 15),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.of(context).pop(),
+                                          child: const Text('확인'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                                child: const Text(
+                                  '문의 하기',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
